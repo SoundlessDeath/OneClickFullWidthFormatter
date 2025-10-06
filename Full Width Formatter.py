@@ -46,7 +46,7 @@ def resolve_output_path(out_dir: Path, src_name: str) -> Path:
     Strategy:
       - If no conflict: name.ext
       - If conflict: name_indent.ext
-      - If conflict: name_indent_copy(2).ext, copy(3)...
+      - If conflict: name_indent1.ext, name_indent2.ext, ...
     """
     base = Path(src_name).stem
     ext = Path(src_name).suffix
@@ -59,9 +59,9 @@ def resolve_output_path(out_dir: Path, src_name: str) -> Path:
     if not candidate.exists():
         return candidate
 
-    i = 2
+    i = 1
     while True:
-        candidate = out_dir / f"{base}_indent_copy({i}){ext}"
+        candidate = out_dir / f"{base}_indent{i}{ext}"
         if not candidate.exists():
             return candidate
         i += 1
@@ -75,15 +75,21 @@ def detect_encoding(data: bytes) -> str:
     # BOMs
     if data.startswith(b"\xef\xbb\xbf"):
         return "utf-8-sig"
+    if data.startswith((b"\xff\xfe\x00\x00", b"\x00\x00\xfe\xff")):
+        # UTF-32 BOMs (check before UTF-16)
+        return "utf-32" if data.startswith(b"\xff\xfe\x00\x00") else "utf-32"
     if data.startswith(b"\xff\xfe"):
         return "utf-16-le"
     if data.startswith(b"\xfe\xff"):
         return "utf-16-be"
 
     # charset-normalizer
-    result = from_bytes(data).best()
-    if result and result.encoding:
-        return result.encoding
+    try:
+        result = from_bytes(data).best()
+        if result and result.encoding:
+            return result.encoding
+    except Exception:
+        pass
     return "utf-8"
 
 
@@ -235,7 +241,7 @@ class IndentorApp(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Indentor v1 · Windows")
-        self.setMinimumWidth(720)
+        self.setMinimumWidth(800)  # Increased width to accommodate longer text
         self.files: List[Path] = []
         self.out_dir: Optional[Path] = None
         self.worker: Optional[ProcessorWorker] = None
@@ -248,20 +254,35 @@ class IndentorApp(QtWidgets.QWidget):
         layout.setSpacing(12)
 
         # Title
-        title = QtWidgets.QLabel("批量首行缩进（全角空格×2）")
+        title = QtWidgets.QLabel("批量首行缩进")
         title.setStyleSheet("font-size:20px; font-weight:600;")
         layout.addWidget(title)
 
-        note = QtWidgets.QLabel("请将 .doc 文件先转为 .docx 文件，才能使用本脚本！ / Please convert .doc to .docx before using this tool!")
-        note.setWordWrap(True)
-        note.setStyleSheet("color:#666;")
-        layout.addWidget(note)
+        # Split note into two lines
+        note1 = QtWidgets.QLabel("请将 .doc 文件先转为 .docx 文件，才能使用本脚本！")
+        note1.setStyleSheet("color:#666;")
+        note1.setAlignment(QtCore.Qt.AlignLeft)
+        layout.addWidget(note1)
+        
+        note2 = QtWidgets.QLabel("使用前建议先清除原有排版（仅保留分段）")
+        note2.setStyleSheet("color:#666;")
+        note2.setAlignment(QtCore.Qt.AlignLeft)
+        layout.addWidget(note2)
+
+        # Multi-path checkbox
+        self.chk_multipath = QtWidgets.QCheckBox("多路径文件")
+        self.chk_multipath.setStyleSheet("color:#666;")
+        layout.addWidget(self.chk_multipath)
 
         # File picker row
         file_row = QtWidgets.QHBoxLayout()
         self.btn_pick = QtWidgets.QPushButton("选择文件（可多选）…")
         self.btn_pick.clicked.connect(self.pick_files)
         file_row.addWidget(self.btn_pick)
+        
+        self.btn_clear = QtWidgets.QPushButton("清除")
+        self.btn_clear.clicked.connect(self.clear_files)
+        file_row.addWidget(self.btn_clear)
 
         self.sel_summary = QtWidgets.QLabel("未选择文件")
         self.sel_summary.setStyleSheet("color:#444;")
@@ -340,7 +361,10 @@ class IndentorApp(QtWidgets.QWidget):
             selected = [Path(p) for p in dlg.selectedFiles()]
             # Filter to .txt / .docx just in case
             selected = [p for p in selected if p.suffix.lower() in {'.txt', '.docx'}]
-            self.files = selected
+            if self.chk_multipath.isChecked():
+                self.files.extend(selected)
+            else:
+                self.files = selected
             self.update_selected_summary()
 
     def update_selected_summary(self):
@@ -367,8 +391,11 @@ class IndentorApp(QtWidgets.QWidget):
         if not Path(path).exists():
             QtWidgets.QMessageBox.warning(self, "提示", "输出文件夹不存在")
             return
-        # Open in Explorer
-        os.startfile(path)
+        # Open in Explorer with error handling
+        try:
+            os.startfile(path)
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(self, "错误", f"无法打开文件夹：{str(e)}")
 
     def start_processing(self):
         if not self.files:
@@ -386,6 +413,11 @@ class IndentorApp(QtWidgets.QWidget):
             QtWidgets.QMessageBox.warning(self, "提示", "没有输出文件夹的写入权限")
             return
 
+        # Clean up previous worker if exists
+        if self.worker and self.worker.isRunning():
+            self.worker.terminate()
+            self.worker.wait()
+
         self.btn_start.setEnabled(False)
         self.btn_pick.setEnabled(False)
         self.btn_out.setEnabled(False)
@@ -393,6 +425,10 @@ class IndentorApp(QtWidgets.QWidget):
         self.lbl_processing.setText("正在处理：－")
         self.lbl_done.setText("已完成：－")
         self.lbl_err.setText("错误：－")
+        
+        # Reset completion tracking
+        self._completed_names = []
+        self._error_msgs = []
 
         self.worker = ProcessorWorker(self.files, out_path)
         self.worker.progress.connect(self.on_progress)
@@ -401,14 +437,19 @@ class IndentorApp(QtWidgets.QWidget):
 
     def on_progress(self, result: TaskResult):
         # Update progress bar & labels
-        idx = self.files.index(result.src)
-        pct = int((idx + 1) / max(1, len(self.files)) * 100)
-        self.progress_bar.setValue(pct)
+        try:
+            idx = self.files.index(result.src)
+            pct = int((idx + 1) / max(1, len(self.files)) * 100)
+            self.progress_bar.setValue(pct)
+        except ValueError:
+            # File not in list, shouldn't happen but handle gracefully
+            pass
 
-        # Processing display: show up to 3 current filenames (last 3 emitted that are not done?)
-        # For simplicity, show the current one
-        proc_list = [result.src.name]
-        self.lbl_processing.setText("正在处理：" + ", ".join(proc_list))
+        # Show current processing file
+        if idx < len(self.files) - 1:  # Not the last file
+            self.lbl_processing.setText("正在处理：" + result.src.name)
+        else:
+            self.lbl_processing.setText("正在处理：完成")
 
         # Completed list (last up to 3)
         if not hasattr(self, "_completed_names"):
@@ -426,10 +467,21 @@ class IndentorApp(QtWidgets.QWidget):
             self.lbl_err.setText("错误：" + " | ".join(self._error_msgs))
 
     def on_finished_all(self):
+        self.lbl_processing.setText("正在处理：全部完成")
         self.btn_start.setEnabled(True)
         self.btn_pick.setEnabled(True)
         self.btn_out.setEnabled(True)
+        
+        # Clean up worker
+        if self.worker:
+            self.worker.deleteLater()
+            self.worker = None
+            
         QtWidgets.QMessageBox.information(self, "完成", "处理完毕！")
+
+    def clear_files(self):
+        self.files = []
+        self.update_selected_summary()
 
 
 def main():
