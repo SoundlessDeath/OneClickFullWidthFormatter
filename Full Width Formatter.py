@@ -21,9 +21,11 @@ from __future__ import annotations
 import os
 import sys
 import re
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
+from datetime import datetime
 
 # --- Third-party ---
 from charset_normalizer import from_bytes
@@ -36,6 +38,47 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 FULL_WIDTH_SPACE = "\u3000"  # U+3000
 FW2 = FULL_WIDTH_SPACE * 2
+
+# -----------------------------
+# Logging setup
+# -----------------------------
+
+def setup_logger(enable_log=False):
+    """设置日志记录器"""
+    if not enable_log:
+        return None
+    
+    try:
+        # 获取脚本所在目录
+        script_dir = Path(__file__).parent
+        log_dir = script_dir / "Logs"
+        
+        # 创建Logs目录（如果不存在）
+        log_dir.mkdir(exist_ok=True)
+        
+        # 使用当前日期作为日志文件名
+        today = datetime.now().strftime("%Y-%m-%d")
+        log_file = log_dir / f"formatter_{today}.log"
+        
+        # 创建logger
+        logger = logging.getLogger('FormatterLogger')
+        logger.setLevel(logging.INFO)
+        
+        # 清除之前的handlers（避免重复）
+        logger.handlers.clear()
+        
+        # 创建文件handler
+        handler = logging.FileHandler(log_file, encoding='utf-8', mode='a')
+        formatter = logging.Formatter('%(asctime)s - %(message)s', 
+                                    datefmt='%Y-%m-%d %H:%M')
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        
+        return logger
+        
+    except Exception as e:
+        # 如果日志设置失败，返回None，不影响主功能
+        return None
 
 # -----------------------------
 # Utility: Filename resolution
@@ -213,12 +256,24 @@ class ProcessorWorker(QtCore.QThread):
     progress = QtCore.Signal(object)  # TaskResult per file
     finished_all = QtCore.Signal()
 
-    def __init__(self, files: List[Path], out_dir: Path):
+    def __init__(self, files: List[Path], out_dir: Path, logger=None):
         super().__init__()
         self.files = files
         self.out_dir = out_dir
+        self.logger = logger
+        self.successful_outputs = []
+        self.errors = []
 
     def run(self):
+        # 记录转换开始
+        if self.logger:
+            self.logger.info("=" * 50)
+            self.logger.info("转换开始")
+            self.logger.info("转换列表：")
+            for file_path in self.files:
+                self.logger.info(f"  {file_path}")
+            self.logger.info(f"输出目录: {self.out_dir}")
+        
         for f in self.files:
             try:
                 ext = f.suffix.lower()
@@ -228,9 +283,30 @@ class ProcessorWorker(QtCore.QThread):
                     dst = process_docx_file(f, self.out_dir)
                 else:
                     raise ValueError("Unsupported extension")
+                
+                self.successful_outputs.append(dst)
                 self.progress.emit(TaskResult(f, dst, True, "Done"))
+                
             except Exception as e:
+                error_msg = f"{f.name}: {str(e)}"
+                self.errors.append(error_msg)
                 self.progress.emit(TaskResult(f, None, False, str(e)))
+        
+        # 记录最终结果
+        if self.logger:
+            self.logger.info("输出列表：")
+            for output_path in self.successful_outputs:
+                self.logger.info(f"  {output_path}")
+            
+            if self.errors:
+                self.logger.info("错误记录：")
+                for error in self.errors:
+                    self.logger.info(f"  {error}")
+            
+            success_count = len(self.successful_outputs)
+            error_count = len(self.errors)
+            self.logger.info(f"转换完成 - 成功: {success_count}, 失败: {error_count}")
+        
         self.finished_all.emit()
 
 # -----------------------------
@@ -254,7 +330,7 @@ class IndentorApp(QtWidgets.QWidget):
         layout.setSpacing(12)
 
         # Title
-        title = QtWidgets.QLabel("批量首行缩进")
+        title = QtWidgets.QLabel("批量首行缩进（仅支持txt/docx格式）")
         title.setStyleSheet("font-size:20px; font-weight:600;")
         layout.addWidget(title)
 
@@ -269,10 +345,29 @@ class IndentorApp(QtWidgets.QWidget):
         note2.setAlignment(QtCore.Qt.AlignLeft)
         layout.addWidget(note2)
 
-        # Multi-path checkbox
+        # Multi-path checkbox row
+        checkbox_row = QtWidgets.QHBoxLayout()
+        
+        self.chk_clear_list = QtWidgets.QCheckBox("清除转换列表")
+        self.chk_clear_list.setChecked(True)  # Default checked
+        self.chk_clear_list.setStyleSheet("color:#666;")
+        checkbox_row.addWidget(self.chk_clear_list)
+        
+        # Add spacing between checkboxes
+        checkbox_row.addSpacing(20)
+        
         self.chk_multipath = QtWidgets.QCheckBox("多路径文件")
         self.chk_multipath.setStyleSheet("color:#666;")
-        layout.addWidget(self.chk_multipath)
+        checkbox_row.addWidget(self.chk_multipath)
+        
+        # Add spacing and log checkbox
+        checkbox_row.addSpacing(20)
+        self.chk_enable_log = QtWidgets.QCheckBox("记录日志")
+        self.chk_enable_log.setStyleSheet("color:#666;")
+        checkbox_row.addWidget(self.chk_enable_log)
+        
+        checkbox_row.addStretch()  # Push checkboxes to the left
+        layout.addLayout(checkbox_row)
 
         # File picker row
         file_row = QtWidgets.QHBoxLayout()
@@ -361,8 +456,12 @@ class IndentorApp(QtWidgets.QWidget):
             selected = [Path(p) for p in dlg.selectedFiles()]
             # Filter to .txt / .docx just in case
             selected = [p for p in selected if p.suffix.lower() in {'.txt', '.docx'}]
+            
             if self.chk_multipath.isChecked():
-                self.files.extend(selected)
+                # Remove duplicates: check if file already exists in current list
+                existing_paths = {p.resolve() for p in self.files}
+                new_files = [p for p in selected if p.resolve() not in existing_paths]
+                self.files.extend(new_files)
             else:
                 self.files = selected
             self.update_selected_summary()
@@ -418,6 +517,18 @@ class IndentorApp(QtWidgets.QWidget):
             self.worker.terminate()
             self.worker.wait()
 
+        # 设置日志
+        logger = setup_logger(self.chk_enable_log.isChecked())
+        if self.chk_enable_log.isChecked() and logger is None:
+            # 日志设置失败但用户想要日志，给出警告
+            reply = QtWidgets.QMessageBox.question(
+                self, "日志警告", 
+                "日志功能初始化失败，可能是权限问题。\n是否继续不记录日志？",
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
+            )
+            if reply == QtWidgets.QMessageBox.No:
+                return
+
         self.btn_start.setEnabled(False)
         self.btn_pick.setEnabled(False)
         self.btn_out.setEnabled(False)
@@ -430,7 +541,7 @@ class IndentorApp(QtWidgets.QWidget):
         self._completed_names = []
         self._error_msgs = []
 
-        self.worker = ProcessorWorker(self.files, out_path)
+        self.worker = ProcessorWorker(self.files, out_path, logger)
         self.worker.progress.connect(self.on_progress)
         self.worker.finished_all.connect(self.on_finished_all)
         self.worker.start()
@@ -471,6 +582,11 @@ class IndentorApp(QtWidgets.QWidget):
         self.btn_start.setEnabled(True)
         self.btn_pick.setEnabled(True)
         self.btn_out.setEnabled(True)
+        
+        # Clear file list if option is checked
+        if self.chk_clear_list.isChecked():
+            self.files = []
+            self.update_selected_summary()
         
         # Clean up worker
         if self.worker:
