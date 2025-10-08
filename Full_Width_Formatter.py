@@ -338,7 +338,8 @@ class OutputDirDialog(QtWidgets.QDialog):
         
         # Quick access dropdown
         self.quick_combo = QtWidgets.QComboBox()
-        self.quick_combo.setMinimumWidth(120)
+        self.quick_combo.setMinimumWidth(100)  # Reduced from 120
+        self.quick_combo.setMaximumWidth(140)  # Set maximum width to prevent it from expanding too much
         self._populate_quick_access()
         self.quick_combo.currentTextChanged.connect(self._on_quick_access_changed)
         path_layout.addWidget(self.quick_combo)
@@ -377,7 +378,7 @@ class OutputDirDialog(QtWidgets.QDialog):
         
     def _populate_quick_access(self):
         """Populate quick access dropdown with drives and special folders"""
-        self.quick_combo.addItem("快速访问", "")
+        self.quick_combo.addItem("选择地址…", "")
         
         # Add desktop
         try:
@@ -395,6 +396,7 @@ class OutputDirDialog(QtWidgets.QDialog):
                 self.quick_combo.addItem(f"🗃️ {drive_letter}盘", str(drive_path))
         
         # Add Windows Quick Access using pywin32
+        quick_access_items = []
         try:
             import win32com.client
             shell = win32com.client.Dispatch("Shell.Application")
@@ -413,7 +415,7 @@ class OutputDirDialog(QtWidgets.QDialog):
                                     break
                             if not already_added:
                                 display_name = item.Name or Path(path_str).name
-                                self.quick_combo.addItem(f"↘️ {display_name}", path_str)
+                                quick_access_items.append((f"↘️ {display_name}", path_str))
                     except:
                         continue
         except ImportError:
@@ -423,14 +425,27 @@ class OutputDirDialog(QtWidgets.QDialog):
             # Other errors, skip Quick Access
             pass
         
+        # Add separator and quick access items if any exist
+        if quick_access_items:
+            # Add separator (non-clickable)
+            self.quick_combo.addItem("快速访问", "")
+            # Disable the separator item
+            separator_index = self.quick_combo.count() - 1
+            separator_item = self.quick_combo.model().item(separator_index)
+            separator_item.setEnabled(False)
+            
+            # Add the actual quick access items
+            for display_name, path_str in quick_access_items:
+                self.quick_combo.addItem(display_name, path_str)
+        
     def _on_quick_access_changed(self, text):
         """Handle quick access selection"""
-        if text == "快速访问":
+        if text == "选择地址…" or text == "快速访问":
             return
             
         # Get the path from combo data
         current_index = self.quick_combo.currentIndex()
-        if current_index > 0:  # Skip the first "快速访问" item
+        if current_index > 0:  # Skip the first "选择地址…" item
             path_str = self.quick_combo.itemData(current_index)
             if path_str:
                 try:
@@ -441,7 +456,7 @@ class OutputDirDialog(QtWidgets.QDialog):
                 except Exception:
                     pass
         
-        # Reset combo to "快速访问"
+        # Reset combo to "选择地址…"
         self.quick_combo.setCurrentIndex(0)
         
     def _apply_style(self):
@@ -476,6 +491,13 @@ class OutputDirDialog(QtWidgets.QDialog):
                 height: 6px;
                 transform: rotate(45deg);
                 margin-top: -3px;
+            }
+            QComboBox QAbstractItemView::item:disabled {
+                color: #999;
+                background: #f8f8f8;
+            }
+            QComboBox QAbstractItemView::item:disabled:hover {
+                background: #f8f8f8;
             }
             QPushButton { 
                 padding: 8px 15px; 
