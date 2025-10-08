@@ -310,6 +310,264 @@ class ProcessorWorker(QtCore.QThread):
         self.finished_all.emit()
 
 # -----------------------------
+# Custom Output Directory Dialog
+# -----------------------------
+
+class OutputDirDialog(QtWidgets.QDialog):
+    def __init__(self, parent=None, initial_path=""):
+        super().__init__(parent)
+        self.setWindowTitle("选择输出文件夹")
+        self.setModal(True)
+        self.resize(750, 500)  # Increased size for better usability
+        self.selected_path = ""
+        
+        # Set initial directory
+        self.current_path = Path(initial_path) if initial_path and Path(initial_path).exists() else Path.cwd()
+        
+        self._setup_ui()
+        self._apply_style()
+        self._load_directory()
+        
+    def _setup_ui(self):
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setSpacing(10)
+        
+        # Path bar with dropdown
+        path_layout = QtWidgets.QHBoxLayout()
+        
+        # Quick access dropdown
+        self.quick_combo = QtWidgets.QComboBox()
+        self.quick_combo.setMinimumWidth(120)
+        self._populate_quick_access()
+        self.quick_combo.currentTextChanged.connect(self._on_quick_access_changed)
+        path_layout.addWidget(self.quick_combo)
+        
+        path_layout.addWidget(QtWidgets.QLabel("当前路径:"))
+        
+        self.path_edit = QtWidgets.QLineEdit()
+        self.path_edit.setText(str(self.current_path))
+        self.path_edit.returnPressed.connect(self._navigate_to_path)
+        path_layout.addWidget(self.path_edit, 1)
+        
+        self.btn_up = QtWidgets.QPushButton("上级")
+        self.btn_up.clicked.connect(self._go_up)
+        path_layout.addWidget(self.btn_up)
+        
+        layout.addLayout(path_layout)
+        
+        # File list
+        self.file_list = QtWidgets.QListWidget()
+        self.file_list.itemDoubleClicked.connect(self._item_double_clicked)
+        layout.addWidget(self.file_list)
+        
+        # Button layout
+        button_layout = QtWidgets.QHBoxLayout()
+        button_layout.addStretch()
+        
+        self.btn_select = QtWidgets.QPushButton("选择文件夹")
+        self.btn_select.clicked.connect(self._select_current)
+        button_layout.addWidget(self.btn_select)
+        
+        self.btn_cancel = QtWidgets.QPushButton("取消")
+        self.btn_cancel.clicked.connect(self.reject)
+        button_layout.addWidget(self.btn_cancel)
+        
+        layout.addLayout(button_layout)
+        
+    def _populate_quick_access(self):
+        """Populate quick access dropdown with drives and special folders"""
+        self.quick_combo.addItem("快速访问", "")
+        
+        # Add desktop
+        try:
+            desktop_path = Path.home() / "Desktop"
+            if desktop_path.exists():
+                self.quick_combo.addItem("🖥️ 桌面", str(desktop_path))
+        except:
+            pass
+            
+        # Add user home
+        try:
+            home_path = Path.home()
+            self.quick_combo.addItem("🏠 用户文件夹", str(home_path))
+        except:
+            pass
+            
+        # Add documents
+        try:
+            docs_path = Path.home() / "Documents"
+            if docs_path.exists():
+                self.quick_combo.addItem("📁 文档", str(docs_path))
+        except:
+            pass
+        
+        # Add available drives
+        import string
+        for drive_letter in string.ascii_uppercase:
+            drive_path = Path(f"{drive_letter}:\\")
+            if drive_path.exists():
+                self.quick_combo.addItem(f"💾 {drive_letter}盘", str(drive_path))
+                
+    def _on_quick_access_changed(self, text):
+        """Handle quick access selection"""
+        if text == "快速访问":
+            return
+            
+        # Get the path from combo data
+        current_index = self.quick_combo.currentIndex()
+        if current_index > 0:  # Skip the first "快速访问" item
+            path_str = self.quick_combo.itemData(current_index)
+            if path_str:
+                try:
+                    new_path = Path(path_str)
+                    if new_path.exists() and new_path.is_dir():
+                        self.current_path = new_path
+                        self._load_directory()
+                except Exception:
+                    pass
+        
+        # Reset combo to "快速访问"
+        self.quick_combo.setCurrentIndex(0)
+        
+    def _apply_style(self):
+        self.setStyleSheet("""
+            QDialog { background: white; }
+            QLineEdit { 
+                padding: 8px 10px; 
+                border: 1px solid #ddd; 
+                border-radius: 8px; 
+                font-size: 14px;
+            }
+            QComboBox {
+                padding: 6px 8px;
+                border: 1px solid #ddd;
+                border-radius: 8px;
+                background: #fafafa;
+                font-size: 14px;
+            }
+            QComboBox:hover {
+                background: #f2f2f2;
+            }
+            QComboBox::drop-down {
+                border: none;
+                padding-right: 8px;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border: 2px solid #666;
+                border-top: none;
+                border-left: none;
+                width: 6px;
+                height: 6px;
+                transform: rotate(45deg);
+                margin-top: -3px;
+            }
+            QPushButton { 
+                padding: 8px 15px; 
+                border: 1px solid #ddd; 
+                border-radius: 8px; 
+                background: #fafafa; 
+                min-width: 70px;
+                font-size: 14px;
+            }
+            QPushButton:hover { background: #f2f2f2; }
+            QListWidget { 
+                border: 1px solid #ddd; 
+                border-radius: 8px; 
+                background: white;
+                font-size: 14px;
+            }
+            QListWidget::item {
+                padding: 6px 10px;
+                border-bottom: 1px solid #f0f0f0;
+            }
+            QListWidget::item:hover {
+                background: #f5f5f5;
+            }
+            QListWidget::item:selected {
+                background: #e3f2fd;
+                color: black;
+            }
+            QLabel {
+                font-size: 14px;
+            }
+        """)
+        
+    def _load_directory(self):
+        self.file_list.clear()
+        
+        try:
+            if not self.current_path.exists():
+                self.current_path = Path.cwd()
+                
+            self.path_edit.setText(str(self.current_path))
+            
+            # Add parent directory item (if not root)
+            if self.current_path.parent != self.current_path:
+                item = QtWidgets.QListWidgetItem("📁 ..")
+                item.setData(QtCore.Qt.UserRole, str(self.current_path.parent))
+                self.file_list.addItem(item)
+            
+            # Get all items in directory
+            items = []
+            try:
+                for path in self.current_path.iterdir():
+                    if path.is_dir():
+                        items.append((f"📁 {path.name}", str(path), True))
+                    elif path.suffix.lower() in {'.txt', '.docx'}:
+                        icon = "📄" if path.suffix.lower() == '.txt' else "📝"
+                        items.append((f"{icon} {path.name}", str(path), False))
+            except PermissionError:
+                item = QtWidgets.QListWidgetItem("❌ 无法访问此目录")
+                self.file_list.addItem(item)
+                return
+                
+            # Sort: directories first, then files
+            items.sort(key=lambda x: (not x[2], x[0].lower()))
+            
+            # Add items to list
+            for display_name, full_path, is_dir in items:
+                item = QtWidgets.QListWidgetItem(display_name)
+                item.setData(QtCore.Qt.UserRole, full_path)
+                self.file_list.addItem(item)
+                
+        except Exception as e:
+            item = QtWidgets.QListWidgetItem(f"❌ 错误: {str(e)}")
+            self.file_list.addItem(item)
+            
+    def _navigate_to_path(self):
+        path_text = self.path_edit.text().strip()
+        try:
+            new_path = Path(path_text)
+            if new_path.exists() and new_path.is_dir():
+                self.current_path = new_path
+                self._load_directory()
+        except Exception:
+            # Reset to current path if invalid
+            self.path_edit.setText(str(self.current_path))
+            
+    def _go_up(self):
+        if self.current_path.parent != self.current_path:
+            self.current_path = self.current_path.parent
+            self._load_directory()
+            
+    def _item_double_clicked(self, item):
+        path_str = item.data(QtCore.Qt.UserRole)
+        if path_str:
+            path = Path(path_str)
+            if path.exists() and path.is_dir():
+                self.current_path = path
+                self._load_directory()
+                
+    def _select_current(self):
+        self.selected_path = str(self.current_path)
+        self.accept()
+        
+    def get_selected_path(self):
+        return self.selected_path
+
+# -----------------------------
 # GUI
 # -----------------------------
 
@@ -478,9 +736,9 @@ class IndentorApp(QtWidgets.QWidget):
         self.sel_summary.setText(text)
 
     def pick_out_dir(self):
-        d = QtWidgets.QFileDialog.getExistingDirectory(self, "选择输出文件夹")
-        if d:
-            self.out_edit.setText(d)
+        dlg = OutputDirDialog(self, self.out_edit.text().strip())
+        if dlg.exec():
+            self.out_edit.setText(dlg.get_selected_path())
 
     def open_out_dir(self):
         path = self.out_edit.text().strip()
@@ -601,8 +859,6 @@ class IndentorApp(QtWidgets.QWidget):
 
 
 def main():
-    # Windows scaling friendliness
-    QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_EnableHighDpiScaling, True)
     app = QtWidgets.QApplication(sys.argv)
     w = IndentorApp()
     w.show()
