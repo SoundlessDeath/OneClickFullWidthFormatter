@@ -11,7 +11,7 @@ Batch-insert two full-width spaces (U+3000×2) at the start of each line (.txt) 
 - Note line: "Please convert .doc to .docx before using this tool!"
 
 Dependencies (install in Windows):
-    pip install PySide6 python-docx charset-normalizer
+    pip install PySide6 python-docx charset-normalizer pywin32
 
 Pack (optional):
     pyinstaller -F -w -n Indentor_v1_windows indentor_v1_windows.py
@@ -386,29 +386,43 @@ class OutputDirDialog(QtWidgets.QDialog):
                 self.quick_combo.addItem("🖥️ 桌面", str(desktop_path))
         except:
             pass
-            
-        # Add user home
-        try:
-            home_path = Path.home()
-            self.quick_combo.addItem("🏠 用户文件夹", str(home_path))
-        except:
-            pass
-            
-        # Add documents
-        try:
-            docs_path = Path.home() / "Documents"
-            if docs_path.exists():
-                self.quick_combo.addItem("📁 文档", str(docs_path))
-        except:
-            pass
         
         # Add available drives
         import string
         for drive_letter in string.ascii_uppercase:
             drive_path = Path(f"{drive_letter}:\\")
             if drive_path.exists():
-                self.quick_combo.addItem(f"💾 {drive_letter}盘", str(drive_path))
-                
+                self.quick_combo.addItem(f"🗃️ {drive_letter}盘", str(drive_path))
+        
+        # Add Windows Quick Access using pywin32
+        try:
+            import win32com.client
+            shell = win32com.client.Dispatch("Shell.Application")
+            # Get Quick Access folder (FOLDERID_QuickAccess)
+            quick_access = shell.Namespace("shell:::{679f85cb-0220-4080-b29b-5540cc05aab6}")
+            if quick_access:
+                for item in quick_access.Items():
+                    try:
+                        path_str = item.Path
+                        if path_str and Path(path_str).exists() and Path(path_str).is_dir():
+                            # Skip if it's already added (like Desktop)
+                            already_added = False
+                            for i in range(1, self.quick_combo.count()):
+                                if self.quick_combo.itemData(i) == path_str:
+                                    already_added = True
+                                    break
+                            if not already_added:
+                                display_name = item.Name or Path(path_str).name
+                                self.quick_combo.addItem(f"↘️ {display_name}", path_str)
+                    except:
+                        continue
+        except ImportError:
+            # pywin32 not available, skip Quick Access
+            pass
+        except Exception:
+            # Other errors, skip Quick Access
+            pass
+        
     def _on_quick_access_changed(self, text):
         """Handle quick access selection"""
         if text == "快速访问":
