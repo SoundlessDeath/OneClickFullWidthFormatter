@@ -597,7 +597,13 @@ class OutputDirDialog(QtWidgets.QDialog):
                 self._load_directory()
                 
     def _select_current(self):
-        self.selected_path = str(self.current_path)
+        # Use the path from the text field instead of current_path
+        # This allows users to type non-existent paths that will be created later
+        typed_path = self.path_edit.text().strip()
+        if typed_path:
+            self.selected_path = typed_path
+        else:
+            self.selected_path = str(self.current_path)
         self.accept()
         
     def get_selected_path(self):
@@ -799,9 +805,34 @@ class IndentorApp(QtWidgets.QWidget):
             QtWidgets.QMessageBox.information(self, "提示", "请先选择或输入输出文件夹")
             return
         out_path = Path(out_dir)
+        
+        # Check if path exists, if not, try to create it
         if not out_path.exists():
-            QtWidgets.QMessageBox.information(self, "提示", "输出文件夹不存在")
-            return
+            try:
+                # Check if parent directory exists and is writable
+                parent_path = out_path.parent
+                if not parent_path.exists():
+                    QtWidgets.QMessageBox.warning(self, "提示", f"父级目录不存在：{parent_path}")
+                    return
+                if not os.access(parent_path, os.W_OK):
+                    QtWidgets.QMessageBox.warning(self, "提示", f"没有在父级目录创建文件夹的权限：{parent_path}")
+                    return
+                
+                # Try to create the directory
+                out_path.mkdir(parents=True, exist_ok=True)
+                QtWidgets.QMessageBox.information(self, "成功", f"已创建输出文件夹：{out_path}")
+                
+            except PermissionError:
+                QtWidgets.QMessageBox.warning(self, "权限错误", f"没有权限创建文件夹：{out_path}")
+                return
+            except OSError as e:
+                QtWidgets.QMessageBox.warning(self, "创建失败", f"无法创建文件夹：{out_path}\n错误：{str(e)}")
+                return
+            except Exception as e:
+                QtWidgets.QMessageBox.warning(self, "错误", f"创建文件夹时发生未知错误：{str(e)}")
+                return
+        
+        # Check if we have write access to the output directory
         if not os.access(out_path, os.W_OK):
             QtWidgets.QMessageBox.warning(self, "提示", "没有输出文件夹的写入权限")
             return
