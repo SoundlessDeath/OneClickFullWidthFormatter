@@ -35,6 +35,81 @@ FULL_WIDTH_SPACE = "\u3000"  # U+3000
 FW2 = FULL_WIDTH_SPACE * 2
 
 # -----------------------------
+# Localization
+# -----------------------------
+
+TEXTS = {
+    # Window titles
+    "app_title": "Indentor v1 · Windows",
+    "output_dir_title": "选择输出文件夹",
+    
+    # Main UI
+    "main_title": "批量首行缩进（仅支持txt/docx格式）",
+    "note1": "请将 .doc 文件先转为 .docx 文件，才能使用本脚本！",
+    "note2": "使用前建议先清除原有排版（仅保留分段）",
+    "btn_pick_files": "选择文件（可多选）…",
+    "no_files_selected": "未选择文件",
+    "output_placeholder": "输出文件夹路径（可直接输入或右侧选择）",
+    "btn_output_dir": "输出地址…",
+    "btn_start": "开始",
+    "status_group": "状态",
+    "processing_label": "正在处理：－",
+    "done_label": "已完成：－",
+    "error_label": "错误：－",
+    "btn_open_output": "打开输出文件夹",
+    
+    # File dialog
+    "select_files": "选择文件",
+    "file_filter": "文本与 Word (*.txt *.docx)",
+    
+    # Output directory dialog
+    "current_path": "当前路径:",
+    "btn_up": "上级",
+    "btn_select_folder": "选择文件夹",
+    "btn_cancel": "取消",
+    "quick_access_select": "选择地址…",
+    "quick_access_desktop": "🖥️ 桌面",
+    "quick_access_drive": "🗃️ {0}盘",
+    "quick_access_section": "快速访问",
+    "folder_icon": "📁 ..",
+    "cannot_access": "❌ 无法访问此目录",
+    "error_prefix": "❌ 错误: {0}",
+    
+    # Status messages
+    "processing_prefix": "正在处理：",
+    "processing_complete": "正在处理：完成",
+    "processing_all_complete": "正在处理：全部完成",
+    "done_prefix": "已完成：",
+    "error_prefix_status": "错误：",
+    "more_files": "……等 {0} 个",
+    
+    # Message boxes
+    "info_title": "提示",
+    "success_title": "成功",
+    "error_title": "错误",
+    "permission_error_title": "权限错误",
+    "create_failed_title": "创建失败",
+    "complete_title": "完成",
+    
+    "msg_select_output_first": "请先选择输出文件夹",
+    "msg_output_not_exist": "输出文件夹不存在",
+    "msg_cannot_open_folder": "无法打开文件夹：{0}",
+    "msg_select_files_first": "请先选择文件（.txt / .docx）",
+    "msg_select_output_folder": "请先选择或输入输出文件夹",
+    "msg_parent_not_exist": "父级目录不存在：{0}",
+    "msg_no_permission_parent": "没有在父级目录创建文件夹的权限：{0}",
+    "msg_folder_created": "已创建输出文件夹：{0}",
+    "msg_no_permission_create": "没有权限创建文件夹：{0}",
+    "msg_cannot_create_folder": "无法创建文件夹：{0}\n错误：{1}",
+    "msg_unknown_error_create": "创建文件夹时发生未知错误：{0}",
+    "msg_no_write_permission": "没有输出文件夹的写入权限",
+    "msg_processing_complete": "处理完毕！",
+    
+    # Custom message box
+    "btn_ok": "确定",
+}
+
+# -----------------------------
 # Utility: Filename resolution
 # -----------------------------
 
@@ -237,7 +312,7 @@ class ProcessorWorker(QtCore.QThread):
 class OutputDirDialog(QtWidgets.QDialog):
     def __init__(self, parent=None, initial_path=""):
         super().__init__(parent)
-        self.setWindowTitle("选择输出文件夹")
+        self.setWindowTitle(TEXTS["output_dir_title"])
         self.setModal(True)
         self.resize(750, 500)
         self.selected_path = ""
@@ -265,14 +340,14 @@ class OutputDirDialog(QtWidgets.QDialog):
         self.quick_combo.currentTextChanged.connect(self._on_quick_access_changed)
         path_layout.addWidget(self.quick_combo)
         
-        path_layout.addWidget(QtWidgets.QLabel("当前路径:"))
+        path_layout.addWidget(QtWidgets.QLabel(TEXTS["current_path"]))
         
         self.path_edit = QtWidgets.QLineEdit()
         self.path_edit.setText(str(self.current_path))
         self.path_edit.returnPressed.connect(self._navigate_to_path)
         path_layout.addWidget(self.path_edit, 1)
         
-        self.btn_up = QtWidgets.QPushButton("上级")
+        self.btn_up = QtWidgets.QPushButton(TEXTS["btn_up"])
         self.btn_up.clicked.connect(self._go_up)
         path_layout.addWidget(self.btn_up)
         
@@ -287,11 +362,11 @@ class OutputDirDialog(QtWidgets.QDialog):
         button_layout = QtWidgets.QHBoxLayout()
         button_layout.addStretch()
         
-        self.btn_select = QtWidgets.QPushButton("选择文件夹")
+        self.btn_select = QtWidgets.QPushButton(TEXTS["btn_select_folder"])
         self.btn_select.clicked.connect(self._select_current)
         button_layout.addWidget(self.btn_select)
         
-        self.btn_cancel = QtWidgets.QPushButton("取消")
+        self.btn_cancel = QtWidgets.QPushButton(TEXTS["btn_cancel"])
         self.btn_cancel.clicked.connect(self.reject)
         button_layout.addWidget(self.btn_cancel)
         
@@ -299,13 +374,13 @@ class OutputDirDialog(QtWidgets.QDialog):
         
     def _populate_quick_access(self):
         """Populate quick access dropdown with drives and special folders"""
-        self.quick_combo.addItem("选择地址…", "")
+        self.quick_combo.addItem(TEXTS["quick_access_select"], "")
         
         # Add desktop
         try:
             desktop_path = Path.home() / "Desktop"
             if desktop_path.exists():
-                self.quick_combo.addItem("🖥️ 桌面", str(desktop_path))
+                self.quick_combo.addItem(TEXTS["quick_access_desktop"], str(desktop_path))
         except:
             pass
         
@@ -314,7 +389,7 @@ class OutputDirDialog(QtWidgets.QDialog):
         for drive_letter in string.ascii_uppercase:
             drive_path = Path(f"{drive_letter}:\\")
             if drive_path.exists():
-                self.quick_combo.addItem(f"🗃️ {drive_letter}盘", str(drive_path))
+                self.quick_combo.addItem(TEXTS["quick_access_drive"].format(drive_letter), str(drive_path))
         
         # Add Windows Quick Access using pywin32
         quick_access_items = []
@@ -349,7 +424,7 @@ class OutputDirDialog(QtWidgets.QDialog):
         # Add separator and quick access items if any exist
         if quick_access_items:
             # Add separator (non-clickable)
-            self.quick_combo.addItem("快速访问", "")
+            self.quick_combo.addItem(TEXTS["quick_access_section"], "")
             # Disable the separator item
             separator_index = self.quick_combo.count() - 1
             separator_item = self.quick_combo.model().item(separator_index)
@@ -361,7 +436,7 @@ class OutputDirDialog(QtWidgets.QDialog):
         
     def _on_quick_access_changed(self, text):
         """Handle quick access selection"""
-        if text == "选择地址…" or text == "快速访问":
+        if text == TEXTS["quick_access_select"] or text == TEXTS["quick_access_section"]:
             return
             
         # Get the path from combo data
@@ -476,7 +551,7 @@ class OutputDirDialog(QtWidgets.QDialog):
                         icon = "📄" if path.suffix.lower() == '.txt' else "📝"
                         items.append((f"{icon} {path.name}", str(path), False))
             except PermissionError:
-                item = QtWidgets.QListWidgetItem("❌ 无法访问此目录")
+                item = QtWidgets.QListWidgetItem(TEXTS["cannot_access"])
                 self.file_list.addItem(item)
                 return
                 
@@ -490,7 +565,7 @@ class OutputDirDialog(QtWidgets.QDialog):
                 self.file_list.addItem(item)
                 
         except Exception as e:
-            item = QtWidgets.QListWidgetItem(f"❌ 错误: {str(e)}")
+            item = QtWidgets.QListWidgetItem(TEXTS["error_prefix"].format(str(e)))
             self.file_list.addItem(item)
             
     def _navigate_to_path(self):
@@ -531,13 +606,107 @@ class OutputDirDialog(QtWidgets.QDialog):
         return self.selected_path
 
 # -----------------------------
+# Custom Message Box
+# -----------------------------
+
+class StyledMessageBox(QtWidgets.QDialog):
+    def __init__(self, parent=None, title="", message="", icon_type="info"):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setModal(True)
+        self.setFixedSize(480, 220)  # Keep current size
+        self.setWindowFlags(QtCore.Qt.Dialog | QtCore.Qt.WindowTitleHint | QtCore.Qt.WindowCloseButtonHint)
+        
+        self.icon_type = icon_type  # Store icon type for styling
+        self._setup_ui(message, icon_type)
+        self._apply_style()
+        
+    def _setup_ui(self, message, icon_type):
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(30, 30, 30, 30)  # Increased margins for better spacing
+        layout.setSpacing(25)
+        
+        # Content area with centered alignment
+        content_layout = QtWidgets.QVBoxLayout()
+        content_layout.setAlignment(QtCore.Qt.AlignCenter)
+        content_layout.setSpacing(15)
+        
+        # Icon - centered
+        icon_label = QtWidgets.QLabel()
+        if icon_type == "success":
+            icon_label.setText("✅")
+        elif icon_type == "error":
+            icon_label.setText("❌")
+        elif icon_type == "info":
+            icon_label.setText("ℹ️")
+        icon_label.setStyleSheet("font-size: 22px;")  # Changed to 22px
+        icon_label.setAlignment(QtCore.Qt.AlignCenter)
+        content_layout.addWidget(icon_label)
+        
+        # Message - centered
+        msg_label = QtWidgets.QLabel(message)
+        msg_label.setWordWrap(True)
+        msg_label.setStyleSheet("font-size: 16px; color: #333; line-height: 1.4;")
+        msg_label.setAlignment(QtCore.Qt.AlignCenter)
+        content_layout.addWidget(msg_label)
+        
+        layout.addLayout(content_layout)
+        
+        # Button - centered
+        button_layout = QtWidgets.QHBoxLayout()
+        button_layout.addStretch()
+        
+        ok_button = QtWidgets.QPushButton(TEXTS["btn_ok"])
+        ok_button.setFixedSize(80, 35)
+        ok_button.setObjectName("styledButton")
+        ok_button.clicked.connect(self.accept)
+        button_layout.addWidget(ok_button)
+        
+        button_layout.addStretch()
+        
+        layout.addLayout(button_layout)
+        
+    def _apply_style(self):
+        # Determine button color based on icon type
+        if self.icon_type == "error":
+            button_color = "#e74c3c"
+            button_hover = "#c0392b"
+            button_pressed = "#a93226"
+        else:
+            button_color = "#6aa3ff"
+            button_hover = "#5a93ff"
+            button_pressed = "#4a83ff"
+            
+        self.setStyleSheet(f"""
+            QDialog {{
+                background: white;
+                border: 1px solid #ddd;
+                border-radius: 12px;
+            }}
+            QPushButton#styledButton {{
+                background: {button_color};
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-size: 14px;
+                font-weight: 600;
+            }}
+            QPushButton#styledButton:hover {{
+                background: {button_hover};
+            }}
+            QPushButton#styledButton:pressed {{
+                background: {button_pressed};
+            }}
+        """)
+
+# -----------------------------
 # GUI
 # -----------------------------
 
 class IndentorApp(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Indentor v1 · Windows")
+        self.setWindowTitle(TEXTS["app_title"])
         self.setMinimumWidth(800)  # Increased width to accommodate longer text
         self.files: List[Path] = []
         self.out_dir: Optional[Path] = None
@@ -551,28 +720,28 @@ class IndentorApp(QtWidgets.QWidget):
         layout.setSpacing(12)
 
         # Title
-        title = QtWidgets.QLabel("批量首行缩进（仅支持txt/docx格式））")
+        title = QtWidgets.QLabel(TEXTS["main_title"])
         title.setStyleSheet("font-size:20px; font-weight:600;")
         layout.addWidget(title)
 
         # Split note into two lines
-        note1 = QtWidgets.QLabel("请将 .doc 文件先转为 .docx 文件，才能使用本脚本！")
+        note1 = QtWidgets.QLabel(TEXTS["note1"])
         note1.setStyleSheet("color:#666;")
         note1.setAlignment(QtCore.Qt.AlignLeft)
         layout.addWidget(note1)
         
-        note2 = QtWidgets.QLabel("使用前建议先清除原有排版（仅保留分段）")
+        note2 = QtWidgets.QLabel(TEXTS["note2"])
         note2.setStyleSheet("color:#666;")
         note2.setAlignment(QtCore.Qt.AlignLeft)
         layout.addWidget(note2)
 
         # File picker row
         file_row = QtWidgets.QHBoxLayout()
-        self.btn_pick = QtWidgets.QPushButton("选择文件（可多选）…")
+        self.btn_pick = QtWidgets.QPushButton(TEXTS["btn_pick_files"])
         self.btn_pick.clicked.connect(self.pick_files)
         file_row.addWidget(self.btn_pick)
 
-        self.sel_summary = QtWidgets.QLabel("未选择文件")
+        self.sel_summary = QtWidgets.QLabel(TEXTS["no_files_selected"])
         self.sel_summary.setStyleSheet("color:#444;")
         self.sel_summary.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
         file_row.addWidget(self.sel_summary, 1)
@@ -581,30 +750,30 @@ class IndentorApp(QtWidgets.QWidget):
         # Output dir row
         out_row = QtWidgets.QHBoxLayout()
         self.out_edit = QtWidgets.QLineEdit()
-        self.out_edit.setPlaceholderText("输出文件夹路径（可直接输入或右侧选择）")
+        self.out_edit.setPlaceholderText(TEXTS["output_placeholder"])
         out_row.addWidget(self.out_edit, 1)
-        self.btn_out = QtWidgets.QPushButton("输出地址…")
+        self.btn_out = QtWidgets.QPushButton(TEXTS["btn_output_dir"])
         self.btn_out.clicked.connect(self.pick_out_dir)
         out_row.addWidget(self.btn_out)
         layout.addLayout(out_row)
 
         # Start button
-        self.btn_start = QtWidgets.QPushButton("开始")
+        self.btn_start = QtWidgets.QPushButton(TEXTS["btn_start"])
         self.btn_start.setFixedHeight(36)
         self.btn_start.setStyleSheet("font-weight:600;")
         self.btn_start.clicked.connect(self.start_processing)
         layout.addWidget(self.btn_start)
 
         # Status area
-        grp = QtWidgets.QGroupBox("状态")
+        grp = QtWidgets.QGroupBox(TEXTS["status_group"])
         gl = QtWidgets.QGridLayout(grp)
         gl.setContentsMargins(12, 12, 12, 12)
         gl.setHorizontalSpacing(10)
         gl.setVerticalSpacing(6)
 
-        self.lbl_processing = QtWidgets.QLabel("正在处理：－")
-        self.lbl_done = QtWidgets.QLabel("已完成：－")
-        self.lbl_err = QtWidgets.QLabel("错误：－")
+        self.lbl_processing = QtWidgets.QLabel(TEXTS["processing_label"])
+        self.lbl_done = QtWidgets.QLabel(TEXTS["done_label"])
+        self.lbl_err = QtWidgets.QLabel(TEXTS["error_label"])
         for w in (self.lbl_processing, self.lbl_done, self.lbl_err):
             w.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
 
@@ -612,7 +781,7 @@ class IndentorApp(QtWidgets.QWidget):
         gl.addWidget(self.lbl_done, 1, 0)
         gl.addWidget(self.lbl_err, 2, 0)
 
-        self.btn_open_out = QtWidgets.QPushButton("打开输出文件夹")
+        self.btn_open_out = QtWidgets.QPushButton(TEXTS["btn_open_output"])
         self.btn_open_out.clicked.connect(self.open_out_dir)
         gl.addWidget(self.btn_open_out, 3, 0, 1, 1)
 
@@ -640,11 +809,11 @@ class IndentorApp(QtWidgets.QWidget):
 
     # ---------------- Events ----------------
     def pick_files(self):
-        dlg = QtWidgets.QFileDialog(self, "选择文件")
+        dlg = QtWidgets.QFileDialog(self, TEXTS["select_files"])
         dlg.setFileMode(QtWidgets.QFileDialog.ExistingFiles)
         # Only one combined filter, no "All files" option
-        dlg.setNameFilters(["文本与 Word (*.txt *.docx)"])
-        dlg.selectNameFilter("文本与 Word (*.txt *.docx)")
+        dlg.setNameFilters([TEXTS["file_filter"]])
+        dlg.selectNameFilter(TEXTS["file_filter"])
         if dlg.exec():
             selected = [Path(p) for p in dlg.selectedFiles()]
             # Filter to .txt / .docx just in case
@@ -654,13 +823,13 @@ class IndentorApp(QtWidgets.QWidget):
 
     def update_selected_summary(self):
         if not self.files:
-            self.sel_summary.setText("未选择文件")
+            self.sel_summary.setText(TEXTS["no_files_selected"])
             return
         paths = [str(p) for p in self.files[:3]]
         extra = len(self.files) - 3
         text = "\n".join(paths)
         if extra > 0:
-            text += f"\n……等 {extra} 个"
+            text += TEXTS["more_files"].format(extra)
         self.sel_summary.setText(text)
 
     def pick_out_dir(self):
@@ -671,24 +840,24 @@ class IndentorApp(QtWidgets.QWidget):
     def open_out_dir(self):
         path = self.out_edit.text().strip()
         if not path:
-            QtWidgets.QMessageBox.information(self, "提示", "请先选择输出文件夹")
+            QtWidgets.QMessageBox.information(self, TEXTS["info_title"], TEXTS["msg_select_output_first"])
             return
         if not Path(path).exists():
-            QtWidgets.QMessageBox.warning(self, "提示", "输出文件夹不存在")
+            QtWidgets.QMessageBox.warning(self, TEXTS["info_title"], TEXTS["msg_output_not_exist"])
             return
         # Open in Explorer with error handling
         try:
             os.startfile(path)
         except Exception as e:
-            QtWidgets.QMessageBox.warning(self, "错误", f"无法打开文件夹：{str(e)}")
+            QtWidgets.QMessageBox.warning(self, TEXTS["error_title"], TEXTS["msg_cannot_open_folder"].format(str(e)))
 
     def start_processing(self):
         if not self.files:
-            QtWidgets.QMessageBox.information(self, "提示", "请先选择文件（.txt / .docx）")
+            QtWidgets.QMessageBox.information(self, TEXTS["info_title"], TEXTS["msg_select_files_first"])
             return
         out_dir = self.out_edit.text().strip()
         if not out_dir:
-            QtWidgets.QMessageBox.information(self, "提示", "请先选择或输入输出文件夹")
+            QtWidgets.QMessageBox.information(self, TEXTS["info_title"], TEXTS["msg_select_output_folder"])
             return
         out_path = Path(out_dir)
         
@@ -698,29 +867,29 @@ class IndentorApp(QtWidgets.QWidget):
                 # Check if parent directory exists and is writable
                 parent_path = out_path.parent
                 if not parent_path.exists():
-                    QtWidgets.QMessageBox.warning(self, "提示", f"父级目录不存在：{parent_path}")
+                    QtWidgets.QMessageBox.warning(self, TEXTS["info_title"], TEXTS["msg_parent_not_exist"].format(parent_path))
                     return
                 if not os.access(parent_path, os.W_OK):
-                    QtWidgets.QMessageBox.warning(self, "提示", f"没有在父级目录创建文件夹的权限：{parent_path}")
+                    QtWidgets.QMessageBox.warning(self, TEXTS["info_title"], TEXTS["msg_no_permission_parent"].format(parent_path))
                     return
                 
                 # Try to create the directory
                 out_path.mkdir(parents=True, exist_ok=True)
-                QtWidgets.QMessageBox.information(self, "成功", f"已创建输出文件夹：{out_path}")
+                QtWidgets.QMessageBox.information(self, TEXTS["success_title"], TEXTS["msg_folder_created"].format(out_path))
                 
             except PermissionError:
-                QtWidgets.QMessageBox.warning(self, "权限错误", f"没有权限创建文件夹：{out_path}")
+                QtWidgets.QMessageBox.warning(self, TEXTS["permission_error_title"], TEXTS["msg_no_permission_create"].format(out_path))
                 return
             except OSError as e:
-                QtWidgets.QMessageBox.warning(self, "创建失败", f"无法创建文件夹：{out_path}\n错误：{str(e)}")
+                QtWidgets.QMessageBox.warning(self, TEXTS["create_failed_title"], TEXTS["msg_cannot_create_folder"].format(out_path, str(e)))
                 return
             except Exception as e:
-                QtWidgets.QMessageBox.warning(self, "错误", f"创建文件夹时发生未知错误：{str(e)}")
+                QtWidgets.QMessageBox.warning(self, TEXTS["error_title"], TEXTS["msg_unknown_error_create"].format(str(e)))
                 return
         
         # Check if we have write access to the output directory
         if not os.access(out_path, os.W_OK):
-            QtWidgets.QMessageBox.warning(self, "提示", "没有输出文件夹的写入权限")
+            QtWidgets.QMessageBox.warning(self, TEXTS["info_title"], TEXTS["msg_no_write_permission"])
             return
 
         # Clean up previous worker if exists
@@ -732,9 +901,9 @@ class IndentorApp(QtWidgets.QWidget):
         self.btn_pick.setEnabled(False)
         self.btn_out.setEnabled(False)
         self.progress_bar.setValue(0)
-        self.lbl_processing.setText("正在处理：－")
-        self.lbl_done.setText("已完成：－")
-        self.lbl_err.setText("错误：－")
+        self.lbl_processing.setText(TEXTS["processing_label"])
+        self.lbl_done.setText(TEXTS["done_label"])
+        self.lbl_err.setText(TEXTS["error_label"])
 
         # Reset completion tracking
         self._completed_names = []
@@ -757,9 +926,9 @@ class IndentorApp(QtWidgets.QWidget):
 
         # Show current processing file
         if idx < len(self.files) - 1:  # Not the last file
-            self.lbl_processing.setText("正在处理：" + result.src.name)
+            self.lbl_processing.setText(TEXTS["processing_prefix"] + result.src.name)
         else:
-            self.lbl_processing.setText("正在处理：完成")
+            self.lbl_processing.setText(TEXTS["processing_complete"])
 
         # Completed list (last up to 3)
         if not hasattr(self, "_completed_names"):
@@ -767,17 +936,17 @@ class IndentorApp(QtWidgets.QWidget):
         if result.ok:
             self._completed_names.append(result.src.name)
             self._completed_names = self._completed_names[-3:]
-            self.lbl_done.setText("已完成：" + ", ".join(self._completed_names))
+            self.lbl_done.setText(TEXTS["done_prefix"] + ", ".join(self._completed_names))
         else:
             # Error list accumulate (last up to 3)
             if not hasattr(self, "_error_msgs"):
                 self._error_msgs = []
             self._error_msgs.append(f"{result.src.name}: {result.message}")
             self._error_msgs = self._error_msgs[-3:]
-            self.lbl_err.setText("错误：" + " | ".join(self._error_msgs))
+            self.lbl_err.setText(TEXTS["error_prefix_status"] + " | ".join(self._error_msgs))
 
     def on_finished_all(self):
-        self.lbl_processing.setText("正在处理：全部完成")
+        self.lbl_processing.setText(TEXTS["processing_all_complete"])
         self.btn_start.setEnabled(True)
         self.btn_pick.setEnabled(True)
         self.btn_out.setEnabled(True)
@@ -787,7 +956,7 @@ class IndentorApp(QtWidgets.QWidget):
             self.worker.deleteLater()
             self.worker = None
             
-        QtWidgets.QMessageBox.information(self, "完成", "处理完毕！")
+        QtWidgets.QMessageBox.information(self, TEXTS["complete_title"], TEXTS["msg_processing_complete"])
 
 
 def main():
