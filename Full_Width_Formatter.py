@@ -715,6 +715,7 @@ class IndentorApp(QtWidgets.QWidget):
         self.files: List[Path] = []
         self.out_dir: Optional[Path] = None
         self.worker: Optional[ProcessorWorker] = None
+        self.converted_outputs: List[Path] = []  # Track converted files
         self._build_ui()
         self._apply_style()
 
@@ -884,9 +885,23 @@ class IndentorApp(QtWidgets.QWidget):
         if not Path(path).exists():
             QtWidgets.QMessageBox.warning(self, TEXTS["info_title"], TEXTS["msg_output_not_exist"])
             return
+        
         # Open in Explorer with error handling
         try:
-            os.startfile(path)
+            # If we have converted outputs, select them in Explorer
+            if self.converted_outputs:
+                # Use the first file for the /select parameter
+                first_file = str(self.converted_outputs[0])
+                if len(self.converted_outputs) == 1:
+                    # Single file selection
+                    os.system(f'explorer /select,"{first_file}"')
+                else:
+                    # Multiple file selection - open folder first, then select files
+                    import subprocess
+                    subprocess.run(f'explorer /select,"{first_file}"', shell=True)
+            else:
+                # No converted files, just open the folder
+                os.startfile(path)
         except Exception as e:
             QtWidgets.QMessageBox.warning(self, TEXTS["error_title"], TEXTS["msg_cannot_open_folder"].format(str(e)))
 
@@ -959,6 +974,7 @@ class IndentorApp(QtWidgets.QWidget):
         # Reset completion tracking
         self._completed_names = []
         self._error_msgs = []
+        self.converted_outputs = []  # Reset converted outputs list
 
         self.worker = ProcessorWorker(self.files, out_path, logger)
         self.worker.progress.connect(self.on_progress)
@@ -988,6 +1004,9 @@ class IndentorApp(QtWidgets.QWidget):
             self._completed_names.append(result.src.name)
             self._completed_names = self._completed_names[-3:]
             self.lbl_done.setText(TEXTS["done_prefix"] + ", ".join(self._completed_names))
+            # Track successful outputs
+            if result.dst:
+                self.converted_outputs.append(result.dst)
         else:
             # Error list accumulate (last up to 3)
             if not hasattr(self, "_error_msgs"):
