@@ -20,19 +20,16 @@ Pack (optional):
 from __future__ import annotations
 import os
 import sys
-import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 # --- Third-party ---
 from charset_normalizer import from_bytes
 from docx import Document
 from docx.text.paragraph import Paragraph
-from docx.oxml import OxmlElement
-from docx.oxml.ns import qn
 
-from PySide6 import QtCore, QtGui, QtWidgets
+from PySide6 import QtCore, QtWidgets
 
 FULL_WIDTH_SPACE = "\u3000"  # U+3000
 FW2 = FULL_WIDTH_SPACE * 2
@@ -554,7 +551,7 @@ class IndentorApp(QtWidgets.QWidget):
         layout.setSpacing(12)
 
         # Title
-        title = QtWidgets.QLabel("批量首行缩进（全角空格×2）")
+        title = QtWidgets.QLabel("批量首行缩进（仅支持txt/docx格式））")
         title.setStyleSheet("font-size:20px; font-weight:600;")
         layout.addWidget(title)
 
