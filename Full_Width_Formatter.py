@@ -85,6 +85,7 @@ TEXTS = {
     "folder_icon": "📁 ..",
     "cannot_access": "❌ 无法访问此目录",
     "error_prefix": "❌ 错误: {0}",
+    "empty_directory": "（当前路径没有子文件夹与指定格式文件！）",
     
     # Status messages
     "processing_prefix": "正在处理：",
@@ -654,6 +655,11 @@ class OutputDirDialog(QtWidgets.QDialog):
             for display_name, full_path, is_dir in items:
                 item = QtWidgets.QListWidgetItem(display_name)
                 item.setData(QtCore.Qt.UserRole, full_path)
+                self.file_list.addItem(item)
+                
+            # Show empty directory message if no items
+            if not items:
+                item = QtWidgets.QListWidgetItem(TEXTS["empty_directory"])
                 self.file_list.addItem(item)
                 
         except Exception as e:
