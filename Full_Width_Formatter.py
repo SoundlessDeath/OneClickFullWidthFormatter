@@ -77,9 +77,9 @@ TEXTS = {
     "chk_enable_log": "记录日志",
     
     # Output path behavior radio buttons
-    "radio_clear_on_exit": "关闭程序时清除（默认）",
-    "radio_fixed_path": "用户固定路径",
-    "radio_clear_after_conversion": "转换后清除",
+    "radio_clear_on_exit": "路径仅本次使用（默认）",
+    "radio_fixed_path": "路径长期固定",
+    "radio_clear_after_conversion": "路径转换后清除",
     
     # File dialog
     "select_files": "选择文件",
