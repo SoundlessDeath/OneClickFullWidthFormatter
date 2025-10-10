@@ -14,27 +14,25 @@ Dependencies (install in Windows):
     pip install PySide6 python-docx charset-normalizer pywin32
 
 Pack (optional):
-    pyinstaller -F -w -n Indentor_v1_windows indentor_v1_windows.py
+    pyinstaller -F -w -n “一键全角空格缩进工具” Full_Width_Formatter.py
 
 """
 from __future__ import annotations
 import os
 import sys
-import re
 import logging
+import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional
 from datetime import datetime
 
 # --- Third-party ---
 from charset_normalizer import from_bytes
 from docx import Document
 from docx.text.paragraph import Paragraph
-from docx.oxml import OxmlElement
-from docx.oxml.ns import qn
 
-from PySide6 import QtCore, QtGui, QtWidgets
+from PySide6 import QtCore, QtWidgets
 
 FULL_WIDTH_SPACE = "\u3000"  # U+3000
 FW2 = FULL_WIDTH_SPACE * 2
@@ -45,7 +43,7 @@ FW2 = FULL_WIDTH_SPACE * 2
 
 TEXTS = {
     # Window titles
-    "app_title": "Indentor v1 · Windows",
+    "app_title": "一键全角空格缩进",
     "output_dir_title": "选择输出文件夹",
     
     # Main UI
@@ -68,6 +66,11 @@ TEXTS = {
     "chk_clear_list": "清除转换列表",
     "chk_multipath": "多路径文件",
     "chk_enable_log": "记录日志",
+    
+    # Output path behavior radio buttons
+    "radio_clear_on_exit": "关闭程序时清除（默认）",
+    "radio_fixed_path": "用户固定路径",
+    "radio_clear_after_conversion": "转换后清除",
     
     # File dialog
     "select_files": "选择文件",
@@ -168,6 +171,51 @@ def setup_logger(enable_log=False):
     except Exception as e:
         # 如果日志设置失败，返回None，不影响主功能
         return None
+
+# -----------------------------
+# Settings persistence
+# -----------------------------
+
+def get_settings_file() -> Path:
+    """Get the settings file path in the script directory"""
+    script_dir = Path(__file__).parent
+    return script_dir / "formatter_settings.json"
+
+def load_settings() -> dict:
+    """Load settings from JSON file"""
+    settings_file = get_settings_file()
+    default_settings = {
+        "output_path": "",
+        "path_behavior": "clear_on_exit"  # clear_on_exit, fixed_path, clear_after_conversion
+    }
+    
+    try:
+        if settings_file.exists():
+            with open(settings_file, 'r', encoding='utf-8') as f:
+                settings = json.load(f)
+                # Validate path_behavior
+                if settings.get("path_behavior") not in ["clear_on_exit", "fixed_path", "clear_after_conversion"]:
+                    settings["path_behavior"] = "clear_on_exit"
+                # Validate output_path exists only for fixed_path mode
+                if settings.get("path_behavior") == "fixed_path":
+                    output_path = settings.get("output_path", "")
+                    if not output_path or not Path(output_path).exists():
+                        settings["output_path"] = ""
+                        settings["path_behavior"] = "clear_on_exit"
+                return settings
+    except Exception:
+        pass
+    
+    return default_settings
+
+def save_settings(settings: dict):
+    """Save settings to JSON file"""
+    try:
+        settings_file = get_settings_file()
+        with open(settings_file, 'w', encoding='utf-8') as f:
+            json.dump(settings, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass  # Silently fail if can't save settings
 
 # -----------------------------
 # Utility: Filename resolution
@@ -712,35 +760,46 @@ class IndentorApp(QtWidgets.QWidget):
         super().__init__()
         self.setWindowTitle(TEXTS["app_title"])
         self.setMinimumWidth(800)  # Increased width to accommodate longer text
+        self.setMinimumHeight(580)  # Further reduced from 600 to 580 due to smaller margins
         self.files: List[Path] = []
         self.out_dir: Optional[Path] = None
         self.worker: Optional[ProcessorWorker] = None
         self.converted_outputs: List[Path] = []  # Track converted files
+        self.settings = load_settings()  # Load settings
         self._build_ui()
         self._apply_style()
+        self._load_settings()  # Apply settings
 
     def _build_ui(self):
         layout = QtWidgets.QVBoxLayout(self)
-        layout.setContentsMargins(18, 18, 18, 18)
-        layout.setSpacing(12)
+        layout.setContentsMargins(18, 12, 18, 18)  # Reduced top margin from 18 to 12
+        layout.setSpacing(8)  # Reduced from 12 to 8
 
         # Title
         title = QtWidgets.QLabel(TEXTS["main_title"])
         title.setStyleSheet("font-size:20px; font-weight:600;")
         layout.addWidget(title)
 
-        # Split note into two lines
+        # Add minimal spacing after title
+        layout.addSpacing(2)  # Reduced from 4 to 2
+
+        # Notes with reduced spacing
+        notes_layout = QtWidgets.QVBoxLayout()
+        notes_layout.setSpacing(2)  # Minimal spacing between notes
+        
         note1 = QtWidgets.QLabel(TEXTS["note1"])
         note1.setStyleSheet("color:#666;")
         note1.setAlignment(QtCore.Qt.AlignLeft)
-        layout.addWidget(note1)
+        notes_layout.addWidget(note1)
         
         note2 = QtWidgets.QLabel(TEXTS["note2"])
         note2.setStyleSheet("color:#666;")
         note2.setAlignment(QtCore.Qt.AlignLeft)
-        layout.addWidget(note2)
+        notes_layout.addWidget(note2)
+        
+        layout.addLayout(notes_layout)
 
-        # Multi-path checkbox row
+        # Multi-path checkbox row with reduced spacing
         checkbox_row = QtWidgets.QHBoxLayout()
         
         self.chk_clear_list = QtWidgets.QCheckBox(TEXTS["chk_clear_list"])
@@ -763,6 +822,9 @@ class IndentorApp(QtWidgets.QWidget):
         
         checkbox_row.addStretch()  # Push checkboxes to the left
         layout.addLayout(checkbox_row)
+
+        # Add minimal spacing before file picker row
+        layout.addSpacing(2)  # Further reduced from 4 to 2
 
         # File picker row
         file_row = QtWidgets.QHBoxLayout()
@@ -789,6 +851,27 @@ class IndentorApp(QtWidgets.QWidget):
         self.btn_out.clicked.connect(self.pick_out_dir)
         out_row.addWidget(self.btn_out)
         layout.addLayout(out_row)
+
+        # Add minimal spacing before radio buttons
+        layout.addSpacing(2)  # Reduce spacing before radio buttons
+
+        # Output path behavior radio buttons
+        radio_row = QtWidgets.QHBoxLayout()
+        self.radio_clear_on_exit = QtWidgets.QRadioButton(TEXTS["radio_clear_on_exit"])
+        self.radio_clear_on_exit.setChecked(True)  # Default checked
+        radio_row.addWidget(self.radio_clear_on_exit)
+        
+        self.radio_fixed_path = QtWidgets.QRadioButton(TEXTS["radio_fixed_path"])
+        radio_row.addWidget(self.radio_fixed_path)
+        
+        self.radio_clear_after_conversion = QtWidgets.QRadioButton(TEXTS["radio_clear_after_conversion"])
+        radio_row.addWidget(self.radio_clear_after_conversion)
+        
+        radio_row.addStretch()  # Push radio buttons to the left
+        layout.addLayout(radio_row)
+
+        # Add minimal spacing before start button
+        layout.addSpacing(2)  # Reduce spacing before start button
 
         # Start button
         self.btn_start = QtWidgets.QPushButton(TEXTS["btn_start"])
@@ -839,6 +922,33 @@ class IndentorApp(QtWidgets.QWidget):
             QProgressBar::chunk { border-radius:6px; background:#6aa3ff; }
             """
         )
+
+    def _load_settings(self):
+        """Apply loaded settings to the UI"""
+        self.out_edit.setText(self.settings.get("output_path", ""))
+        path_behavior = self.settings.get("path_behavior", "clear_on_exit")
+        if path_behavior == "fixed_path":
+            self.radio_fixed_path.setChecked(True)
+        elif path_behavior == "clear_after_conversion":
+            self.radio_clear_after_conversion.setChecked(True)
+        else:
+            self.radio_clear_on_exit.setChecked(True)
+
+    def closeEvent(self, event):
+        """Handle window close event to save settings"""
+        # Save current settings
+        if self.radio_fixed_path.isChecked():
+            self.settings["path_behavior"] = "fixed_path"
+            self.settings["output_path"] = self.out_edit.text().strip()
+        elif self.radio_clear_after_conversion.isChecked():
+            self.settings["path_behavior"] = "clear_after_conversion"
+            self.settings["output_path"] = ""  # Don't save path for this mode
+        else:  # clear_on_exit
+            self.settings["path_behavior"] = "clear_on_exit"
+            self.settings["output_path"] = ""  # Don't save path for this mode
+        
+        save_settings(self.settings)
+        event.accept()
 
     # ---------------- Events ----------------
     def pick_files(self):
@@ -1026,6 +1136,10 @@ class IndentorApp(QtWidgets.QWidget):
             self.files = []
             self.update_selected_summary()
         
+        # Clear output path if "转换后清除" is selected
+        if self.radio_clear_after_conversion.isChecked():
+            self.out_edit.clear()
+        
         # Clean up worker
         if self.worker:
             self.worker.deleteLater()
@@ -1036,6 +1150,22 @@ class IndentorApp(QtWidgets.QWidget):
     def clear_files(self):
         self.files = []
         self.update_selected_summary()
+
+    def closeEvent(self, event):
+        """Handle window close event to save settings"""
+        # Save current settings
+        if self.radio_fixed_path.isChecked():
+            self.settings["path_behavior"] = "fixed_path"
+            self.settings["output_path"] = self.out_edit.text().strip()
+        elif self.radio_clear_after_conversion.isChecked():
+            self.settings["path_behavior"] = "clear_after_conversion"
+            self.settings["output_path"] = ""  # Don't save path for this mode
+        else:  # clear_on_exit
+            self.settings["path_behavior"] = "clear_on_exit"
+            self.settings["output_path"] = ""  # Don't save path for this mode
+        
+        save_settings(self.settings)
+        event.accept()
 
 
 def main():
