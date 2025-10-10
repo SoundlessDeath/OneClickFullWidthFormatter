@@ -32,7 +32,7 @@ from charset_normalizer import from_bytes
 from docx import Document
 from docx.text.paragraph import Paragraph
 
-from PySide6 import QtCore, QtWidgets
+from PySide6 import QtCore, QtWidgets, QtGui
 
 FULL_WIDTH_SPACE = "\u3000"  # U+3000
 FW2 = FULL_WIDTH_SPACE * 2
@@ -45,6 +45,7 @@ TEXTS = {
     # Window titles
     "app_title": "一键全角空格缩进",
     "output_dir_title": "选择输出文件夹",
+    "clipboard_title": "剪贴板模式 - 一键全角空格缩进",
     
     # Main UI
     "main_title": "批量首行缩进（仅支持txt/docx格式）",
@@ -52,6 +53,7 @@ TEXTS = {
     "note2": "使用前建议先清除原有排版（仅保留分段）",
     "btn_pick_files": "选择文件（可多选）…",
     "btn_clear": "清除",
+    "btn_clipboard_mode": "剪贴板模式",
     "no_files_selected": "未选择文件",
     "output_placeholder": "输出文件夹路径（可直接输入或右侧选择）",
     "btn_output_dir": "输出地址…",
@@ -61,6 +63,13 @@ TEXTS = {
     "done_label": "已完成：－",
     "error_label": "错误：－",
     "btn_open_output": "打开输出文件夹",
+    
+    # Clipboard mode UI
+    "input_placeholder": "在此粘贴或输入要处理的文本...\n\n快捷键提示：\n• Ctrl+Z：撤销\n• Ctrl+C：复制\n• Ctrl+X：剪切\n• Ctrl+V：粘贴",
+    "result_placeholder": "处理结果将显示在这里...",
+    "btn_process": "处理",
+    "btn_clear_input": "清空",
+    "btn_select_all_copy": "全选复制",
     
     # Checkboxes
     "chk_clear_list": "清除转换列表",
@@ -120,6 +129,7 @@ TEXTS = {
     "msg_no_write_permission": "没有输出文件夹的写入权限",
     "msg_processing_complete": "处理完毕！",
     "msg_log_warning": "日志功能初始化失败，可能是权限问题。\n是否继续不记录日志？",
+    "msg_copied_to_clipboard": "已复制到剪贴板",
     
     # Log messages
     "log_conversion_start": "转换开始",
@@ -130,6 +140,231 @@ TEXTS = {
     "log_conversion_complete": "转换完成 - 成功: {0}, 失败: {1}",
     "log_warning_title": "日志警告",
 }
+
+# -----------------------------
+# Text processing utilities
+# -----------------------------
+
+def process_text_lines(text: str) -> str:
+    """Process text lines by adding full-width spaces at the beginning of each non-empty line"""
+    if not text:
+        return text
+    
+    lines = text.splitlines(keepends=True)
+    
+    def transform_line(line: str) -> str:
+        # Separate content and line ending
+        if line.endswith("\r\n"):
+            core, eol = line[:-2], "\r\n"
+        elif line.endswith("\n"):
+            core, eol = line[:-1], "\n"
+        elif line.endswith("\r"):
+            core, eol = line[:-1], "\r"
+        else:
+            core, eol = line, ""
+
+        if core.strip() == "":
+            return core + eol
+        # Idempotent: ensure startswith 2 full-width spaces
+        if core.startswith(FW2):
+            return core + eol
+        # If there are ASCII spaces/tabs at start, normalize to two full-width spaces
+        core_no_leading = core.lstrip(" \t")
+        return FW2 + core_no_leading + eol
+
+    return "".join(transform_line(l) for l in lines)
+
+# -----------------------------
+# Clipboard Mode Window
+# -----------------------------
+
+class ClipboardModeWindow(QtWidgets.QMainWindow):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(TEXTS["clipboard_title"])
+        self.setMinimumSize(1000, 700)
+        self.resize(1200, 800)
+        
+        # History for undo functionality
+        self.input_history = []
+        self.history_index = -1
+        
+        self._setup_ui()
+        self._setup_shortcuts()
+        self._apply_style()
+        
+    def _setup_ui(self):
+        central_widget = QtWidgets.QWidget()
+        self.setCentralWidget(central_widget)
+        
+        layout = QtWidgets.QHBoxLayout(central_widget)
+        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setSpacing(15)
+        
+        # Left side - Result area
+        left_layout = QtWidgets.QVBoxLayout()
+        
+        result_label = QtWidgets.QLabel("处理结果")
+        result_label.setStyleSheet("font-size: 16px; font-weight: 600; color: #333; margin-bottom: 5px;")
+        left_layout.addWidget(result_label)
+        
+        self.result_text = QtWidgets.QTextEdit()
+        self.result_text.setPlaceholderText(TEXTS["result_placeholder"])
+        self.result_text.setReadOnly(True)
+        left_layout.addWidget(self.result_text)
+        
+        # Result buttons
+        result_btn_layout = QtWidgets.QHBoxLayout()
+        result_btn_layout.addStretch()
+        
+        self.btn_select_all_copy = QtWidgets.QPushButton(TEXTS["btn_select_all_copy"])
+        self.btn_select_all_copy.clicked.connect(self.select_all_copy)
+        result_btn_layout.addWidget(self.btn_select_all_copy)
+        
+        left_layout.addLayout(result_btn_layout)
+        
+        # Right side - Input area
+        right_layout = QtWidgets.QVBoxLayout()
+        
+        input_label = QtWidgets.QLabel("输入区域")
+        input_label.setStyleSheet("font-size: 16px; font-weight: 600; color: #333; margin-bottom: 5px;")
+        right_layout.addWidget(input_label)
+        
+        self.input_text = QtWidgets.QTextEdit()
+        self.input_text.setPlaceholderText(TEXTS["input_placeholder"])
+        self.input_text.textChanged.connect(self.on_input_changed)
+        right_layout.addWidget(self.input_text)
+        
+        # Input buttons
+        input_btn_layout = QtWidgets.QHBoxLayout()
+        
+        self.btn_clear_input = QtWidgets.QPushButton(TEXTS["btn_clear_input"])
+        self.btn_clear_input.clicked.connect(self.clear_input)
+        input_btn_layout.addWidget(self.btn_clear_input)
+        
+        input_btn_layout.addStretch()
+        
+        self.btn_process = QtWidgets.QPushButton(TEXTS["btn_process"])
+        self.btn_process.setStyleSheet("font-weight: 600; min-width: 100px;")
+        self.btn_process.clicked.connect(self.process_text)
+        input_btn_layout.addWidget(self.btn_process)
+        
+        right_layout.addLayout(input_btn_layout)
+        
+        # Add layouts to main layout
+        layout.addLayout(left_layout, 1)
+        layout.addLayout(right_layout, 1)
+        
+    def _setup_shortcuts(self):
+        # Ctrl+Z for undo (custom implementation)
+        undo_shortcut = QtGui.QShortcut(QtGui.QKeySequence.Undo, self.input_text)
+        undo_shortcut.activated.connect(self.custom_undo)
+        
+    def keyPressEvent(self, event):
+        """Handle key press events for the main window"""
+        # Let parent handle all key events
+        super().keyPressEvent(event)
+        
+    def _apply_style(self):
+        self.setStyleSheet("""
+            QMainWindow { background: white; }
+            QTextEdit {
+                border: 1px solid #ddd;
+                border-radius: 8px;
+                padding: 10px;
+                font-size: 14px;
+                font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+                line-height: 1.4;
+            }
+            QTextEdit:focus {
+                border: 2px solid #6aa3ff;
+            }
+            QPushButton {
+                padding: 8px 16px;
+                border: 1px solid #ddd;
+                border-radius: 8px;
+                background: #fafafa;
+                font-size: 14px;
+                min-height: 20px;
+            }
+            QPushButton:hover {
+                background: #f2f2f2;
+            }
+            QPushButton:pressed {
+                background: #e8e8e8;
+            }
+            QLabel {
+                color: #333;
+            }
+        """)
+        
+    def on_input_changed(self):
+        # Save to history for undo
+        current_text = self.input_text.toPlainText()
+        
+        # Only save if text is different from last entry
+        if not self.input_history or self.input_history[-1] != current_text:
+            self.input_history.append(current_text)
+            # Keep only last 50 states
+            if len(self.input_history) > 50:
+                self.input_history.pop(0)
+            self.history_index = len(self.input_history) - 1
+            
+    def custom_undo(self):
+        if len(self.input_history) > 1 and self.history_index > 0:
+            self.history_index -= 1
+            previous_text = self.input_history[self.history_index]
+            
+            # Temporarily disconnect signal to avoid adding to history
+            self.input_text.textChanged.disconnect()
+            self.input_text.setPlainText(previous_text)
+            self.input_text.textChanged.connect(self.on_input_changed)
+            
+    def process_text(self):
+        input_text = self.input_text.toPlainText()
+        if not input_text.strip():
+            return
+            
+        processed_text = process_text_lines(input_text)
+        self.result_text.setPlainText(processed_text)
+        
+    def clear_input(self):
+        self.input_text.clear()
+        self.result_text.clear()
+        # Reset history
+        self.input_history = [""]
+        self.history_index = 0
+        
+    def select_all_copy(self):
+        result_text = self.result_text.toPlainText()
+        if result_text:
+            clipboard = QtWidgets.QApplication.clipboard()
+            clipboard.setText(result_text)
+            
+            # Show temporary message
+            self.show_status_message(TEXTS["msg_copied_to_clipboard"])
+            
+    def show_status_message(self, message):
+        # Create a temporary status bar message
+        if hasattr(self, 'status_bar'):
+            self.status_bar.deleteLater()
+            
+        self.status_bar = QtWidgets.QLabel(message)
+        self.status_bar.setStyleSheet("""
+            QLabel {
+                background: #4CAF50;
+                color: white;
+                padding: 8px 15px;
+                border-radius: 4px;
+                font-size: 12px;
+            }
+        """)
+        self.status_bar.setParent(self)
+        self.status_bar.move(10, self.height() - 40)
+        self.status_bar.show()
+        
+        # Auto-hide after 2 seconds
+        QtCore.QTimer.singleShot(2000, lambda: self.status_bar.deleteLater() if hasattr(self, 'status_bar') else None)
 
 # -----------------------------
 # Logging setup
@@ -582,7 +817,7 @@ class OutputDirDialog(QtWidgets.QDialog):
             
         # Get the path from combo data
         current_index = self.quick_combo.currentIndex()
-        if current_index > 0:  # Skip the first TEXTS["quick_access_select"] item
+        if (current_index > 0):  # Skip the first TEXTS["quick_access_select"] item
             path_str = self.quick_combo.itemData(current_index)
             if path_str:
                 try:
@@ -772,20 +1007,34 @@ class IndentorApp(QtWidgets.QWidget):
 
     def _build_ui(self):
         layout = QtWidgets.QVBoxLayout(self)
-        layout.setContentsMargins(18, 12, 18, 18)  # Reduced top margin from 18 to 12
-        layout.setSpacing(8)  # Reduced from 12 to 8
+        layout.setContentsMargins(18, 15, 18, 18)  # Slightly increased top margin for better balance
+        layout.setSpacing(10)  # Increased from 8 to 10 for better spacing
 
-        # Title
+        # Title and clipboard button row
+        title_row = QtWidgets.QHBoxLayout()
+        
         title = QtWidgets.QLabel(TEXTS["main_title"])
         title.setStyleSheet("font-size:20px; font-weight:600;")
-        layout.addWidget(title)
+        title_row.addWidget(title)
+        
+        title_row.addStretch()  # Push clipboard button to the right
+        
+        # Clipboard mode button (moved to top right with increased size)
+        self.btn_clipboard_mode = QtWidgets.QPushButton(TEXTS["btn_clipboard_mode"])
+        self.btn_clipboard_mode.setFixedHeight(40)  # Increased from 32 to 40
+        self.btn_clipboard_mode.setFixedWidth(120)  # Increased from 100 to 120
+        self.btn_clipboard_mode.setStyleSheet("font-weight:600; font-size:13px;")  # Increased font size
+        self.btn_clipboard_mode.clicked.connect(self.open_clipboard_mode)
+        title_row.addWidget(self.btn_clipboard_mode)
+        
+        layout.addLayout(title_row)
 
-        # Add minimal spacing after title
-        layout.addSpacing(2)  # Reduced from 4 to 2
+        # Add spacing after title
+        layout.addSpacing(5)
 
-        # Notes with reduced spacing
+        # Notes with optimized spacing
         notes_layout = QtWidgets.QVBoxLayout()
-        notes_layout.setSpacing(2)  # Minimal spacing between notes
+        notes_layout.setSpacing(3)  # Slightly increased from 2 to 3
         
         note1 = QtWidgets.QLabel(TEXTS["note1"])
         note1.setStyleSheet("color:#666;")
@@ -799,7 +1048,10 @@ class IndentorApp(QtWidgets.QWidget):
         
         layout.addLayout(notes_layout)
 
-        # Multi-path checkbox row with reduced spacing
+        # Add spacing after notes
+        layout.addSpacing(8)
+
+        # Multi-path checkbox row with better spacing
         checkbox_row = QtWidgets.QHBoxLayout()
         
         self.chk_clear_list = QtWidgets.QCheckBox(TEXTS["chk_clear_list"])
@@ -808,14 +1060,14 @@ class IndentorApp(QtWidgets.QWidget):
         checkbox_row.addWidget(self.chk_clear_list)
         
         # Add spacing between checkboxes
-        checkbox_row.addSpacing(20)
+        checkbox_row.addSpacing(25)  # Increased from 20 to 25
         
         self.chk_multipath = QtWidgets.QCheckBox(TEXTS["chk_multipath"])
         self.chk_multipath.setStyleSheet("color:#666;")
         checkbox_row.addWidget(self.chk_multipath)
         
         # Add spacing and log checkbox
-        checkbox_row.addSpacing(20)
+        checkbox_row.addSpacing(25)  # Increased from 20 to 25
         self.chk_enable_log = QtWidgets.QCheckBox(TEXTS["chk_enable_log"])
         self.chk_enable_log.setStyleSheet("color:#666;")
         checkbox_row.addWidget(self.chk_enable_log)
@@ -823,8 +1075,8 @@ class IndentorApp(QtWidgets.QWidget):
         checkbox_row.addStretch()  # Push checkboxes to the left
         layout.addLayout(checkbox_row)
 
-        # Add minimal spacing before file picker row
-        layout.addSpacing(2)  # Further reduced from 4 to 2
+        # Add spacing before file picker row
+        layout.addSpacing(6)  # Increased from 2 to 6
 
         # File picker row
         file_row = QtWidgets.QHBoxLayout()
@@ -842,6 +1094,9 @@ class IndentorApp(QtWidgets.QWidget):
         file_row.addWidget(self.sel_summary, 1)
         layout.addLayout(file_row)
 
+        # Add spacing before output dir row
+        layout.addSpacing(4)
+
         # Output dir row
         out_row = QtWidgets.QHBoxLayout()
         self.out_edit = QtWidgets.QLineEdit()
@@ -852,8 +1107,8 @@ class IndentorApp(QtWidgets.QWidget):
         out_row.addWidget(self.btn_out)
         layout.addLayout(out_row)
 
-        # Add minimal spacing before radio buttons
-        layout.addSpacing(2)  # Reduce spacing before radio buttons
+        # Add spacing before radio buttons
+        layout.addSpacing(6)  # Increased from 2 to 6
 
         # Output path behavior radio buttons
         radio_row = QtWidgets.QHBoxLayout()
@@ -870,8 +1125,8 @@ class IndentorApp(QtWidgets.QWidget):
         radio_row.addStretch()  # Push radio buttons to the left
         layout.addLayout(radio_row)
 
-        # Add minimal spacing before start button
-        layout.addSpacing(2)  # Reduce spacing before start button
+        # Add spacing before start button
+        layout.addSpacing(8)  # Increased from 2 to 8
 
         # Start button
         self.btn_start = QtWidgets.QPushButton(TEXTS["btn_start"])
@@ -879,6 +1134,9 @@ class IndentorApp(QtWidgets.QWidget):
         self.btn_start.setStyleSheet("font-weight:600;")
         self.btn_start.clicked.connect(self.start_processing)
         layout.addWidget(self.btn_start)
+
+        # Add spacing before status area
+        layout.addSpacing(5)
 
         # Status area
         grp = QtWidgets.QGroupBox(TEXTS["status_group"])
@@ -902,6 +1160,9 @@ class IndentorApp(QtWidgets.QWidget):
         gl.addWidget(self.btn_open_out, 3, 0, 1, 1)
 
         layout.addWidget(grp)
+
+        # Add minimal spacing before progress bar
+        layout.addSpacing(3)
 
         self.progress_bar = QtWidgets.QProgressBar()
         self.progress_bar.setRange(0, 100)
@@ -934,239 +1195,122 @@ class IndentorApp(QtWidgets.QWidget):
         else:
             self.radio_clear_on_exit.setChecked(True)
 
-    def closeEvent(self, event):
-        """Handle window close event to save settings"""
-        # Save current settings
-        if self.radio_fixed_path.isChecked():
-            self.settings["path_behavior"] = "fixed_path"
-            self.settings["output_path"] = self.out_edit.text().strip()
-        elif self.radio_clear_after_conversion.isChecked():
-            self.settings["path_behavior"] = "clear_after_conversion"
-            self.settings["output_path"] = ""  # Don't save path for this mode
-        else:  # clear_on_exit
-            self.settings["path_behavior"] = "clear_on_exit"
-            self.settings["output_path"] = ""  # Don't save path for this mode
-        
-        save_settings(self.settings)
-        event.accept()
+    def open_clipboard_mode(self):
+        self.clipboard_window = ClipboardModeWindow(self)
+        self.clipboard_window.show()
 
-    # ---------------- Events ----------------
     def pick_files(self):
-        dlg = QtWidgets.QFileDialog(self, TEXTS["select_files"])
-        dlg.setFileMode(QtWidgets.QFileDialog.ExistingFiles)
-        # Only one combined filter, no "All files" option
-        dlg.setNameFilters([TEXTS["file_filter"]])
-        dlg.selectNameFilter(TEXTS["file_filter"])
-        if dlg.exec():
-            selected = [Path(p) for p in dlg.selectedFiles()]
-            # Filter to .txt / .docx just in case
-            selected = [p for p in selected if p.suffix.lower() in {'.txt', '.docx'}]
-            
-            if self.chk_multipath.isChecked():
-                # Remove duplicates: check if file already exists in current list
-                existing_paths = {p.resolve() for p in self.files}
-                new_files = [p for p in selected if p.resolve() not in existing_paths]
-                self.files.extend(new_files)
-            else:
-                self.files = selected
-            self.update_selected_summary()
+        options = QtWidgets.QFileDialog.Options()
+        files, _ = QtWidgets.QFileDialog.getOpenFileNames(
+            self, TEXTS["select_files"], "", TEXTS["file_filter"], options=options
+        )
+        if files:
+            if self.chk_clear_list.isChecked():
+                self.files = []
+            self.files.extend(Path(f) for f in files)
+            self.update_file_summary()
 
-    def update_selected_summary(self):
+    def clear_files(self):
+        self.files = []
+        self.update_file_summary()
+
+    def update_file_summary(self):
         if not self.files:
             self.sel_summary.setText(TEXTS["no_files_selected"])
-            return
-        paths = [str(p) for p in self.files[:3]]
-        extra = len(self.files) - 3
-        text = "\n".join(paths)
-        if extra > 0:
-            text += TEXTS["more_files"].format(extra)
-        self.sel_summary.setText(text)
+        else:
+            file_names = [f.name for f in self.files[:3]]
+            more_count = len(self.files) - 3
+            if more_count > 0:
+                file_names.append(TEXTS["more_files"].format(more_count))
+            self.sel_summary.setText("\n".join(file_names))
 
     def pick_out_dir(self):
-        dlg = OutputDirDialog(self, self.out_edit.text().strip())
-        if dlg.exec():
-            self.out_edit.setText(dlg.get_selected_path())
-
-    def open_out_dir(self):
-        path = self.out_edit.text().strip()
-        if not path:
-            QtWidgets.QMessageBox.information(self, TEXTS["info_title"], TEXTS["msg_select_output_first"])
-            return
-        if not Path(path).exists():
-            QtWidgets.QMessageBox.warning(self, TEXTS["info_title"], TEXTS["msg_output_not_exist"])
-            return
-        
-        # Open in Explorer with error handling
-        try:
-            # If we have converted outputs, select them in Explorer
-            if self.converted_outputs:
-                # Use the first file for the /select parameter
-                first_file = str(self.converted_outputs[0])
-                if len(self.converted_outputs) == 1:
-                    # Single file selection
-                    os.system(f'explorer /select,"{first_file}"')
-                else:
-                    # Multiple file selection - open folder first, then select files
-                    import subprocess
-                    subprocess.run(f'explorer /select,"{first_file}"', shell=True)
-            else:
-                # No converted files, just open the folder
-                os.startfile(path)
-        except Exception as e:
-            QtWidgets.QMessageBox.warning(self, TEXTS["error_title"], TEXTS["msg_cannot_open_folder"].format(str(e)))
+        dialog = OutputDirDialog(self, initial_path=self.out_edit.text())
+        if dialog.exec() == QtWidgets.QDialog.Accepted:
+            self.out_dir = Path(dialog.get_selected_path())
+            self.out_edit.setText(str(self.out_dir))
 
     def start_processing(self):
         if not self.files:
-            QtWidgets.QMessageBox.information(self, TEXTS["info_title"], TEXTS["msg_select_files_first"])
+            QtWidgets.QMessageBox.warning(self, TEXTS["error_title"], TEXTS["msg_select_files_first"])
             return
-        out_dir = self.out_edit.text().strip()
-        if not out_dir:
-            QtWidgets.QMessageBox.information(self, TEXTS["info_title"], TEXTS["msg_select_output_folder"])
+
+        out_dir_text = self.out_edit.text().strip()
+        if not out_dir_text:
+            QtWidgets.QMessageBox.warning(self, TEXTS["error_title"], TEXTS["msg_select_output_folder"])
             return
-        out_path = Path(out_dir)
-        
-        # Check if path exists, if not, try to create it
-        if not out_path.exists():
+
+        self.out_dir = Path(out_dir_text)
+        if not self.out_dir.exists():
             try:
-                # Check if parent directory exists and is writable
-                parent_path = out_path.parent
-                if not parent_path.exists():
-                    QtWidgets.QMessageBox.warning(self, TEXTS["info_title"], TEXTS["msg_parent_not_exist"].format(parent_path))
-                    return
-                if not os.access(parent_path, os.W_OK):
-                    QtWidgets.QMessageBox.warning(self, TEXTS["info_title"], TEXTS["msg_no_permission_parent"].format(parent_path))
-                    return
-                
-                # Try to create the directory
-                out_path.mkdir(parents=True, exist_ok=True)
-                QtWidgets.QMessageBox.information(self, TEXTS["success_title"], TEXTS["msg_folder_created"].format(out_path))
-                
-            except PermissionError:
-                QtWidgets.QMessageBox.warning(self, TEXTS["permission_error_title"], TEXTS["msg_no_permission_create"].format(out_path))
-                return
-            except OSError as e:
-                QtWidgets.QMessageBox.warning(self, TEXTS["create_failed_title"], TEXTS["msg_cannot_create_folder"].format(out_path, str(e)))
-                return
+                self.out_dir.mkdir(parents=True, exist_ok=True)
             except Exception as e:
-                QtWidgets.QMessageBox.warning(self, TEXTS["error_title"], TEXTS["msg_unknown_error_create"].format(str(e)))
+                QtWidgets.QMessageBox.critical(self, TEXTS["create_failed_title"], str(e))
                 return
-        
-        # Check if we have write access to the output directory
-        if not os.access(out_path, os.W_OK):
-            QtWidgets.QMessageBox.warning(self, TEXTS["info_title"], TEXTS["msg_no_write_permission"])
+
+        if not os.access(self.out_dir, os.W_OK):
+            QtWidgets.QMessageBox.critical(self, TEXTS["permission_error_title"], TEXTS["msg_no_write_permission"])
             return
 
-        # Clean up previous worker if exists
-        if self.worker and self.worker.isRunning():
-            self.worker.terminate()
-            self.worker.wait()
+        # Save settings
+        self.settings["output_path"] = str(self.out_dir)
+        if self.radio_fixed_path.isChecked():
+            self.settings["path_behavior"] = "fixed_path"
+        elif self.radio_clear_after_conversion.isChecked():
+            self.settings["path_behavior"] = "clear_after_conversion"
+        else:
+            self.settings["path_behavior"] = "clear_on_exit"
+        save_settings(self.settings)
 
-        # 设置日志
-        logger = setup_logger(self.chk_enable_log.isChecked())
-        if self.chk_enable_log.isChecked() and logger is None:
-            # 日志设置失败但用户想要日志，给出警告
-            reply = QtWidgets.QMessageBox.question(
-                self, TEXTS["log_warning_title"], 
-                TEXTS["msg_log_warning"],
-                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
+        # Setup logger
+        enable_log = self.chk_enable_log.isChecked()
+        self.logger = setup_logger(enable_log)
+        if enable_log and not self.logger:
+            reply = QtWidgets.QMessageBox.warning(
+                self, TEXTS["log_warning_title"], TEXTS["msg_log_warning"], 
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, QtWidgets.QMessageBox.No
             )
             if reply == QtWidgets.QMessageBox.No:
                 return
 
-        self.btn_start.setEnabled(False)
-        self.btn_pick.setEnabled(False)
-        self.btn_out.setEnabled(False)
-        self.progress_bar.setValue(0)
+        self.converted_outputs = []
         self.lbl_processing.setText(TEXTS["processing_label"])
         self.lbl_done.setText(TEXTS["done_label"])
         self.lbl_err.setText(TEXTS["error_label"])
-        
-        # Reset completion tracking
-        self._completed_names = []
-        self._error_msgs = []
-        self.converted_outputs = []  # Reset converted outputs list
+        self.progress_bar.setValue(0)
 
-        self.worker = ProcessorWorker(self.files, out_path, logger)
+        self.worker = ProcessorWorker(self.files, self.out_dir, self.logger)
         self.worker.progress.connect(self.on_progress)
         self.worker.finished_all.connect(self.on_finished_all)
         self.worker.start()
 
     def on_progress(self, result: TaskResult):
-        # Update progress bar & labels
-        try:
-            idx = self.files.index(result.src)
-            pct = int((idx + 1) / max(1, len(self.files)) * 100)
-            self.progress_bar.setValue(pct)
-        except ValueError:
-            # File not in list, shouldn't happen but handle gracefully
-            pass
-
-        # Show current processing file
-        if idx < len(self.files) - 1:  # Not the last file
-            self.lbl_processing.setText(TEXTS["processing_prefix"] + result.src.name)
-        else:
-            self.lbl_processing.setText(TEXTS["processing_complete"])
-
-        # Completed list (last up to 3)
-        if not hasattr(self, "_completed_names"):
-            self._completed_names = []
         if result.ok:
-            self._completed_names.append(result.src.name)
-            self._completed_names = self._completed_names[-3:]
-            self.lbl_done.setText(TEXTS["done_prefix"] + ", ".join(self._completed_names))
-            # Track successful outputs
-            if result.dst:
-                self.converted_outputs.append(result.dst)
+            self.converted_outputs.append(result.dst)
+            self.lbl_done.setText(f"{TEXTS['done_prefix']} {len(self.converted_outputs)}")
         else:
-            # Error list accumulate (last up to 3)
-            if not hasattr(self, "_error_msgs"):
-                self._error_msgs = []
-            self._error_msgs.append(f"{result.src.name}: {result.message}")
-            self._error_msgs = self._error_msgs[-3:]
-            self.lbl_err.setText(TEXTS["error_prefix_status"] + " | ".join(self._error_msgs))
+            self.lbl_err.setText(f"{TEXTS['error_prefix_status']} {result.message}")
+
+        progress = (len(self.converted_outputs) + len(self.worker.errors)) / len(self.files) * 100
+        self.progress_bar.setValue(progress)
 
     def on_finished_all(self):
-        self.lbl_processing.setText(TEXTS["processing_all_complete"])
-        self.btn_start.setEnabled(True)
-        self.btn_pick.setEnabled(True)
-        self.btn_out.setEnabled(True)
-        
-        # Clear file list if option is checked
-        if self.chk_clear_list.isChecked():
-            self.files = []
-            self.update_selected_summary()
-        
-        # Clear output path if "转换后清除" is selected
-        if self.radio_clear_after_conversion.isChecked():
-            self.out_edit.clear()
-        
-        # Clean up worker
-        if self.worker:
-            self.worker.deleteLater()
-            self.worker = None
-            
+        self.lbl_processing.setText(TEXTS["processing_complete"])
+        self.progress_bar.setValue(100)
         QtWidgets.QMessageBox.information(self, TEXTS["complete_title"], TEXTS["msg_processing_complete"])
 
-    def clear_files(self):
-        self.files = []
-        self.update_selected_summary()
+        if self.radio_clear_after_conversion.isChecked():
+            self.out_edit.clear()
+            self.out_dir = None
 
-    def closeEvent(self, event):
-        """Handle window close event to save settings"""
-        # Save current settings
-        if self.radio_fixed_path.isChecked():
-            self.settings["path_behavior"] = "fixed_path"
-            self.settings["output_path"] = self.out_edit.text().strip()
-        elif self.radio_clear_after_conversion.isChecked():
-            self.settings["path_behavior"] = "clear_after_conversion"
-            self.settings["output_path"] = ""  # Don't save path for this mode
-        else:  # clear_on_exit
-            self.settings["path_behavior"] = "clear_on_exit"
-            self.settings["output_path"] = ""  # Don't save path for this mode
-        
-        save_settings(self.settings)
-        event.accept()
-
+    def open_out_dir(self):
+        if self.out_dir and self.out_dir.exists():
+            try:
+                os.startfile(self.out_dir)
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, TEXTS["error_title"], TEXTS["msg_cannot_open_folder"].format(e))
+        else:
+            QtWidgets.QMessageBox.warning(self, TEXTS["error_title"], TEXTS["msg_output_not_exist"])
 
 def main():
     app = QtWidgets.QApplication(sys.argv)
