@@ -14,7 +14,7 @@ Dependencies (install in Windows):
     pip install PySide6 python-docx charset-normalizer
 
 Pack (optional):
-    pyinstaller -F -w -n Indentor_v1_windows indentor_v1_windows.py
+    pyinstaller -F -w -n "一键全角空格缩进 最小运行版" Full_Width_Formatter_mini.py
 
 """
 from __future__ import annotations
@@ -40,7 +40,7 @@ FW2 = FULL_WIDTH_SPACE * 2
 
 TEXTS = {
     # Window titles
-    "app_title": "Indentor v1 · Windows",
+    "app_title": "一键全角空格缩进 最小运行版",
     "output_dir_title": "选择输出文件夹",
     
     # Main UI
@@ -764,6 +764,9 @@ class IndentorApp(QtWidgets.QWidget):
         out_row.addWidget(self.btn_out)
         layout.addLayout(out_row)
 
+        # Add extra spacing before start button
+        layout.addSpacing(8)
+
         # Start button
         self.btn_start = QtWidgets.QPushButton(TEXTS["btn_start"])
         self.btn_start.setFixedHeight(36)
@@ -776,7 +779,7 @@ class IndentorApp(QtWidgets.QWidget):
         gl = QtWidgets.QGridLayout(grp)
         gl.setContentsMargins(12, 12, 12, 12)
         gl.setHorizontalSpacing(10)
-        gl.setVerticalSpacing(6)
+        gl.setVerticalSpacing(8)  # Increased from 6 to 8
 
         self.lbl_processing = QtWidgets.QLabel(TEXTS["processing_label"])
         self.lbl_done = QtWidgets.QLabel(TEXTS["done_label"])
@@ -788,16 +791,26 @@ class IndentorApp(QtWidgets.QWidget):
         gl.addWidget(self.lbl_done, 1, 0)
         gl.addWidget(self.lbl_err, 2, 0)
 
+        # Add extra spacing before button
+        gl.setRowMinimumHeight(3, 12)  # Add 12px spacing before button row
+
         self.btn_open_out = QtWidgets.QPushButton(TEXTS["btn_open_output"])
         self.btn_open_out.clicked.connect(self.open_out_dir)
-        gl.addWidget(self.btn_open_out, 3, 0, 1, 1)
+        gl.addWidget(self.btn_open_out, 4, 0, 1, 1)  # Changed from row 3 to row 4
 
         layout.addWidget(grp)
 
+        # Add extra margins around progress bar
+        progress_layout = QtWidgets.QHBoxLayout()
+        progress_layout.setContentsMargins(8, 0, 8, 0)  # Add 8px horizontal margins
         self.progress_bar = QtWidgets.QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        layout.addWidget(self.progress_bar)
+        progress_layout.addWidget(self.progress_bar)
+        layout.addLayout(progress_layout)
+
+        # Set minimum window height to accommodate the spacing changes
+        self.setMinimumHeight(480)  # Increased from default to accommodate new spacing
 
     def _apply_style(self):
         # Minimal, modern, light theme
