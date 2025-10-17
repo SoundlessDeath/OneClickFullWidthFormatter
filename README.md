@@ -13,6 +13,8 @@
 
 ```bash
 python -m venv venv
+```
+```bash
 venv\Scripts\activate
 ```
 若觉得安装到全局没有问题，可忽略本步骤。
