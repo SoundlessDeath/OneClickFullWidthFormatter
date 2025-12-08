@@ -431,12 +431,15 @@ def load_settings() -> dict:
                 # Validate path_behavior
                 if settings.get("path_behavior") not in ["clear_on_exit", "fixed_path", "clear_after_conversion"]:
                     settings["path_behavior"] = "clear_on_exit"
-                # Validate output_path exists only for fixed_path mode
+                # For fixed_path, ensure path exists; otherwise clear it
                 if settings.get("path_behavior") == "fixed_path":
                     output_path = settings.get("output_path", "")
                     if not output_path or not Path(output_path).exists():
                         settings["output_path"] = ""
                         settings["path_behavior"] = "clear_on_exit"
+                else:
+                    # Non-fixed modes should not carry a path over app restarts
+                    settings["output_path"] = ""
                 return settings
     except Exception:
         pass
@@ -1186,13 +1189,16 @@ class IndentorApp(QtWidgets.QWidget):
 
     def _load_settings(self):
         """Apply loaded settings to the UI"""
-        self.out_edit.setText(self.settings.get("output_path", ""))
         path_behavior = self.settings.get("path_behavior", "clear_on_exit")
+        # Only show output path for fixed_path mode
         if path_behavior == "fixed_path":
+            self.out_edit.setText(self.settings.get("output_path", ""))
             self.radio_fixed_path.setChecked(True)
         elif path_behavior == "clear_after_conversion":
+            self.out_edit.clear()
             self.radio_clear_after_conversion.setChecked(True)
         else:
+            self.out_edit.clear()
             self.radio_clear_on_exit.setChecked(True)
 
     def open_clipboard_mode(self):
@@ -1252,14 +1258,18 @@ class IndentorApp(QtWidgets.QWidget):
             QtWidgets.QMessageBox.critical(self, TEXTS["permission_error_title"], TEXTS["msg_no_write_permission"])
             return
 
-        # Save settings
-        self.settings["output_path"] = str(self.out_dir)
+        # Save settings according to behavior
         if self.radio_fixed_path.isChecked():
             self.settings["path_behavior"] = "fixed_path"
+            self.settings["output_path"] = str(self.out_dir)
         elif self.radio_clear_after_conversion.isChecked():
             self.settings["path_behavior"] = "clear_after_conversion"
+            # Do not persist the current path
+            self.settings["output_path"] = ""
         else:
             self.settings["path_behavior"] = "clear_on_exit"
+            # Do not persist the current path
+            self.settings["output_path"] = ""
         save_settings(self.settings)
 
         # Setup logger
@@ -1299,9 +1309,19 @@ class IndentorApp(QtWidgets.QWidget):
         self.progress_bar.setValue(100)
         QtWidgets.QMessageBox.information(self, TEXTS["complete_title"], TEXTS["msg_processing_complete"])
 
+        # Clear path in UI and persisted settings when required
         if self.radio_clear_after_conversion.isChecked():
             self.out_edit.clear()
             self.out_dir = None
+            # Persist the cleared state
+            self.settings["output_path"] = ""
+            self.settings["path_behavior"] = "clear_after_conversion"
+            save_settings(self.settings)
+        elif self.radio_clear_on_exit.isChecked():
+            # Do not change UI now, but ensure settings don't persist the path
+            self.settings["output_path"] = ""
+            self.settings["path_behavior"] = "clear_on_exit"
+            save_settings(self.settings)
 
     def open_out_dir(self):
         if self.out_dir and self.out_dir.exists():
